@@ -3,6 +3,7 @@
 /shiptrace-cc-hook
 /shiptrace-git-postcommit
 /bin/
+# Build artifacts from scripts/build-release.sh. Releases live on GitHub.
 /dist/
 
 # Go
