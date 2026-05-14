@@ -1,0 +1,136 @@
+package ccsettings
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestReadMissingFileReturnsEmpty(t *testing.T) {
+	s, err := Read(filepath.Join(t.TempDir(), "missing.json"))
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if s == nil || len(s.Hooks) != 0 {
+		t.Fatalf("expected empty settings, got %+v", s)
+	}
+}
+
+func TestReadPreservesUnknownTopLevelKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	raw := `{"theme":"dark","permissions":{"allow":["foo"]}}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s, err := Read(path)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if _, ok := s.Extras["theme"]; !ok {
+		t.Errorf("theme missing")
+	}
+	if _, ok := s.Extras["permissions"]; !ok {
+		t.Errorf("permissions missing")
+	}
+}
+
+func TestWritePreservesUnknownKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	raw := `{"theme":"dark"}`
+	_ = os.WriteFile(path, []byte(raw), 0o600)
+	s, _ := Read(path)
+	s.MergeShiptraceHooks("/usr/local/bin/shiptrace-cc-hook")
+	if err := Write(path, s); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	out, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("readback: %v", err)
+	}
+	var back map[string]json.RawMessage
+	if err := json.Unmarshal(out, &back); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if _, ok := back["theme"]; !ok {
+		t.Errorf("theme dropped on rewrite")
+	}
+	if _, ok := back["hooks"]; !ok {
+		t.Errorf("hooks missing from rewrite")
+	}
+}
+
+func TestMergeAddsFiveHooks(t *testing.T) {
+	s := &Settings{}
+	added := s.MergeShiptraceHooks("/usr/local/bin/shiptrace-cc-hook")
+	if added != 5 {
+		t.Fatalf("added: %d want 5", added)
+	}
+	for _, h := range ShiptraceHooks {
+		groups := s.Hooks[h.Event]
+		if len(groups) != 1 {
+			t.Errorf("event %s: %d groups", h.Event, len(groups))
+		}
+		if !strings.Contains(groups[0].Hooks[0].Command, h.Subcommand) {
+			t.Errorf("event %s command: %q", h.Event, groups[0].Hooks[0].Command)
+		}
+	}
+}
+
+func TestMergeIdempotent(t *testing.T) {
+	s := &Settings{}
+	first := s.MergeShiptraceHooks("/path/shiptrace-cc-hook")
+	second := s.MergeShiptraceHooks("/path/shiptrace-cc-hook")
+	if first != 5 || second != 0 {
+		t.Errorf("first=%d second=%d want 5/0", first, second)
+	}
+}
+
+func TestMergeIdempotentAcrossBinaryPaths(t *testing.T) {
+	s := &Settings{}
+	s.MergeShiptraceHooks("/old/path/shiptrace-cc-hook")
+	added := s.MergeShiptraceHooks("/new/path/shiptrace-cc-hook")
+	if added != 0 {
+		t.Errorf("expected 0 added after path change, got %d", added)
+	}
+}
+
+func TestMergePreservesUnrelatedHooks(t *testing.T) {
+	s := &Settings{
+		Hooks: map[HookEventName][]HookGroup{
+			Stop: {{Hooks: []Hook{{Type: "command", Command: "/usr/local/bin/some-other-tool"}}}},
+		},
+	}
+	s.MergeShiptraceHooks("/path/shiptrace-cc-hook")
+	stops := s.Hooks[Stop]
+	if len(stops) != 2 {
+		t.Fatalf("expected 2 Stop entries (other + shiptrace), got %d", len(stops))
+	}
+	foundOther := false
+	for _, g := range stops {
+		for _, h := range g.Hooks {
+			if strings.Contains(h.Command, "some-other-tool") {
+				foundOther = true
+			}
+		}
+	}
+	if !foundOther {
+		t.Errorf("user's existing Stop hook was dropped")
+	}
+}
+
+func TestHasShiptraceHooks(t *testing.T) {
+	s := &Settings{}
+	s.MergeShiptraceHooks("/path/shiptrace-cc-hook")
+	present, missing := s.HasShiptraceHooks()
+	if len(missing) != 0 || len(present) != 5 {
+		t.Errorf("present=%v missing=%v", present, missing)
+	}
+
+	empty := &Settings{}
+	_, missing2 := empty.HasShiptraceHooks()
+	if len(missing2) != 5 {
+		t.Errorf("empty should miss 5, got %d", len(missing2))
+	}
+}
