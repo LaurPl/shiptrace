@@ -43,7 +43,7 @@ func newHarness(t *testing.T) *harness {
 
 	now := time.Date(2026, 5, 14, 10, 0, 0, 0, time.UTC)
 	counter := 0
-	h := New(w, m)
+	h := New(w, m, home)
 	h.Now = func() time.Time { return now }
 	h.IDGen = func() string {
 		counter++
@@ -275,5 +275,52 @@ func TestHandleStopWithoutStartStillEmits(t *testing.T) {
 	ev := h.readEvents()
 	if len(ev) != 1 || ev[0].EventType != events.SessionStop {
 		t.Fatalf("expected synthetic session_stop, got %+v", ev)
+	}
+}
+
+func TestHandleSessionStartWritesProjectPointer(t *testing.T) {
+	h := newHarness(t)
+	cwd := t.TempDir() // a real existing dir so the pointer can resolve
+	if err := h.handler.HandleSessionStart(&HookPayload{SessionID: "cc-pp", Cwd: cwd}); err != nil {
+		t.Fatalf("HandleSessionStart: %v", err)
+	}
+
+	pointerPath, err := projectPointerPath(h.home, cwd)
+	if err != nil {
+		t.Fatalf("pointerPath: %v", err)
+	}
+	if _, err := readActivePointer(pointerPath); err != nil {
+		t.Fatalf("pointer not written: %v", err)
+	}
+
+	// Stop cleans up.
+	if err := h.handler.HandleStop(&HookPayload{SessionID: "cc-pp", Cwd: cwd}); err != nil {
+		t.Fatalf("HandleStop: %v", err)
+	}
+	if _, statErr := readActivePointer(pointerPath); statErr == nil {
+		t.Fatalf("pointer should be cleared after HandleStop")
+	}
+}
+
+func TestHandlePromptTouchesProjectPointer(t *testing.T) {
+	h := newHarness(t)
+	cwd := t.TempDir()
+	if err := h.handler.HandleSessionStart(&HookPayload{SessionID: "cc-touch", Cwd: cwd}); err != nil {
+		t.Fatalf("HandleSessionStart: %v", err)
+	}
+	// Advance the handler's clock so Touch produces a visible change.
+	later := h.now.Add(10 * time.Minute)
+	h.handler.Now = func() time.Time { return later }
+
+	if err := h.handler.HandlePrompt(&HookPayload{SessionID: "cc-touch", Cwd: cwd, Prompt: "hi"}); err != nil {
+		t.Fatalf("HandlePrompt: %v", err)
+	}
+	pointerPath, _ := projectPointerPath(h.home, cwd)
+	ptr, err := readActivePointer(pointerPath)
+	if err != nil {
+		t.Fatalf("read pointer: %v", err)
+	}
+	if !ptr.LastActivity.Equal(later) {
+		t.Errorf("LastActivity not advanced: got %v want %v", ptr.LastActivity, later)
 	}
 }

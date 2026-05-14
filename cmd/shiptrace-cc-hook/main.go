@@ -65,7 +65,7 @@ func run(subcommand string) error {
 	if err != nil {
 		return err
 	}
-	h := claudecode.New(w, sessions)
+	h := claudecode.New(w, sessions, home)
 
 	switch subcommand {
 	case "session-start":

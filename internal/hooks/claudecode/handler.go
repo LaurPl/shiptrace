@@ -8,6 +8,7 @@ import (
 
 	"github.com/LaurPl/shiptrace/internal/eventlog"
 	"github.com/LaurPl/shiptrace/internal/events"
+	"github.com/LaurPl/shiptrace/internal/session"
 )
 
 // Provider is the value stamped on Provider for every event emitted by this
@@ -17,19 +18,25 @@ const Provider = "claude-code"
 // Handler is the entry point used by cmd/shiptrace-cc-hook. It owns the
 // eventlog writer and the session-id map; one Handler is constructed per
 // hook invocation (which is fine because both are O(1) to create).
+//
+// Home is the resolved SHIPTRACE_HOME directory; the handler writes the
+// per-project pointer underneath it on SessionStart so the git post-commit
+// adapter can find which shp_ session a commit belongs to.
 type Handler struct {
 	Writer   *eventlog.Writer
 	Sessions *SessionMap
+	Home     string
 	IDGen    func() string          // override for tests
 	Now      func() time.Time       // override for tests
 	Hostname func() (string, error) // override for tests
 }
 
 // New constructs a Handler with sensible production defaults.
-func New(w *eventlog.Writer, m *SessionMap) *Handler {
+func New(w *eventlog.Writer, m *SessionMap, home string) *Handler {
 	return &Handler{
 		Writer:   w,
 		Sessions: m,
+		Home:     home,
 		IDGen:    events.NewSessionID,
 		Now:      func() time.Time { return time.Now().UTC() },
 		Hostname: func() (string, error) { return "", nil },
@@ -62,7 +69,7 @@ func (h *Handler) HandleSessionStart(p *HookPayload) error {
 		meta["transcript_path"] = p.TranscriptPath
 	}
 
-	return h.Writer.Append(events.Event{
+	if err := h.Writer.Append(events.Event{
 		EventType: events.SessionStart,
 		Ts:        now,
 		SessionID: shpID,
@@ -71,7 +78,57 @@ func (h *Handler) HandleSessionStart(p *HookPayload) error {
 		Model:     p.Model,
 		Label:     label,
 		Metadata:  meta,
+	}); err != nil {
+		return err
+	}
+
+	// Write the per-project pointer so `shiptrace ship` and the git
+	// post-commit adapter can attribute work without a flag.
+	return h.writeProjectPointer(p.Cwd, shpID, label, now)
+}
+
+// writeProjectPointer is best-effort: failure is logged into the event
+// metadata path but does NOT fail the hook, since hook failures can wedge
+// the CC session.
+func (h *Handler) writeProjectPointer(cwd, shpID, label string, now time.Time) error {
+	if h.Home == "" || cwd == "" {
+		return nil
+	}
+	path, err := session.ProjectPointerPath(h.Home, cwd)
+	if err != nil {
+		return nil
+	}
+	return session.WriteActive(path, session.ActivePointer{
+		SessionID:    shpID,
+		Label:        label,
+		StartedAt:    now,
+		LastActivity: now,
 	})
+}
+
+// touchProjectPointer bumps LastActivity on the pointer for cwd, if one
+// exists. Best-effort — never fails the hook.
+func (h *Handler) touchProjectPointer(cwd string) {
+	if h.Home == "" || cwd == "" {
+		return
+	}
+	path, err := session.ProjectPointerPath(h.Home, cwd)
+	if err != nil {
+		return
+	}
+	_ = session.Touch(path, h.Now())
+}
+
+// clearProjectPointer removes the pointer for cwd; best-effort.
+func (h *Handler) clearProjectPointer(cwd string) {
+	if h.Home == "" || cwd == "" {
+		return
+	}
+	path, err := session.ProjectPointerPath(h.Home, cwd)
+	if err != nil {
+		return
+	}
+	_ = session.ClearActive(path)
 }
 
 // HandlePrompt emits a prompt event with length + sha256 hash, and a
@@ -103,7 +160,7 @@ func (h *Handler) HandlePrompt(p *HookPayload) error {
 	}
 
 	if phrase := DetectPivotPhrase(p.Prompt); phrase != "" {
-		return h.Writer.Append(events.Event{
+		if err := h.Writer.Append(events.Event{
 			EventType: events.ReplanSignal,
 			Ts:        now,
 			SessionID: shpID,
@@ -113,8 +170,11 @@ func (h *Handler) HandlePrompt(p *HookPayload) error {
 				"phrase": phrase,
 				"weight": 1.0,
 			},
-		})
+		}); err != nil {
+			return err
+		}
 	}
+	h.touchProjectPointer(p.Cwd)
 	return nil
 }
 
@@ -156,7 +216,7 @@ func (h *Handler) HandleToolUse(p *HookPayload) error {
 	// reason about status reversals across consecutive invocations.
 	if p.ToolName == "TodoWrite" {
 		counts, _ := SummarizeTodoWriteInput(p.ToolInput)
-		return h.Writer.Append(events.Event{
+		if err := h.Writer.Append(events.Event{
 			EventType: events.ReplanSignal,
 			Ts:        now,
 			SessionID: shpID,
@@ -170,8 +230,11 @@ func (h *Handler) HandleToolUse(p *HookPayload) error {
 				"payload_hash": HashBytes(p.ToolInput),
 				"weight":       0.5, // raw TodoWrite is a weaker signal than a reversal
 			},
-		})
+		}); err != nil {
+			return err
+		}
 	}
+	h.touchProjectPointer(p.Cwd)
 	return nil
 }
 
@@ -184,7 +247,7 @@ func (h *Handler) HandleSubagentStop(p *HookPayload) error {
 		return err
 	}
 	now := h.Now()
-	return h.Writer.Append(events.Event{
+	if err := h.Writer.Append(events.Event{
 		EventType: events.ToolUse,
 		Ts:        now,
 		SessionID: shpID,
@@ -193,7 +256,11 @@ func (h *Handler) HandleSubagentStop(p *HookPayload) error {
 		Metadata: map[string]any{
 			"subagent": p.Subagent,
 		},
-	})
+	}); err != nil {
+		return err
+	}
+	h.touchProjectPointer(p.Cwd)
+	return nil
 }
 
 // HandleStop emits the session_stop event and cleans up the cc-session-id
@@ -222,6 +289,7 @@ func (h *Handler) HandleStop(p *HookPayload) error {
 	}); err != nil {
 		return err
 	}
+	h.clearProjectPointer(p.Cwd)
 	return h.Sessions.Delete(p.SessionID)
 }
 
