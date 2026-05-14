@@ -42,6 +42,7 @@ func NewRootCommand(stdout, stderr io.Writer) *cobra.Command {
 		newIngestCommand(stdout, stderr),
 		newInitCommand(stdout),
 		newDoctorCommand(stdout),
+		newAdapterCommand(stdout, stderr),
 	)
 	return root
 }
