@@ -1,0 +1,255 @@
+/* shiptrace dashboard — terminal-y, dense, instrument-not-coach. */
+
+:root {
+  --bg: #0a0a0a;
+  --bg-elevated: #141414;
+  --bg-elevated-2: #1c1c1c;
+  --border: #2a2a2a;
+  --fg: #e0e0e0;
+  --fg-dim: #888;
+  --accent: #6ab04c;
+  --accent-dim: #4a7d35;
+  --warn: #f0b232;
+  --error: #d04848;
+  --info: #6aa3d0;
+  --grid-cool: #143958;
+  --grid-warm: #5a2a2a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family:
+    ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+.shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+header.top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+header.top h1 {
+  margin: 0;
+  font-size: 1.1rem;
+  letter-spacing: 0.5px;
+}
+header.top h1 .glyph {
+  color: var(--accent);
+}
+header.top .meta {
+  color: var(--fg-dim);
+  font-size: 0.85rem;
+}
+
+nav.tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+nav.tabs a {
+  padding: 0.5rem 1rem;
+  color: var(--fg-dim);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+nav.tabs a.active {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+nav.tabs a:hover {
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+}
+.card h2 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.95rem;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.card .subtitle {
+  color: var(--fg-dim);
+  font-size: 0.8rem;
+  margin-bottom: 0.75rem;
+}
+
+.empty {
+  color: var(--fg-dim);
+  padding: 1.5rem;
+  text-align: center;
+  font-style: italic;
+}
+
+.loading {
+  color: var(--fg-dim);
+  padding: 1.5rem;
+  text-align: center;
+}
+
+.error {
+  color: var(--error);
+  padding: 0.75rem 1rem;
+  background: rgba(208, 72, 72, 0.07);
+  border: 1px solid rgba(208, 72, 72, 0.3);
+  border-radius: 4px;
+}
+
+table.data {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+table.data th {
+  text-align: left;
+  font-weight: normal;
+  color: var(--fg-dim);
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.5px;
+}
+table.data td {
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--bg-elevated-2);
+  vertical-align: middle;
+}
+table.data tr:hover td {
+  background: var(--bg-elevated-2);
+}
+table.data .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+table.data .id {
+  color: var(--fg-dim);
+  font-size: 0.75rem;
+}
+
+/* Today view: horizontal session bars */
+.timeline {
+  display: grid;
+  grid-template-columns: 1fr 8fr;
+  gap: 0.75rem;
+  align-items: center;
+  font-size: 0.85rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--bg-elevated-2);
+}
+.timeline:last-child {
+  border-bottom: none;
+}
+.timeline .label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.timeline .label .title {
+  color: var(--fg);
+}
+.timeline .label .meta {
+  color: var(--fg-dim);
+  font-size: 0.75rem;
+}
+.timeline .bar-track {
+  position: relative;
+  height: 22px;
+  background: var(--bg-elevated-2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.timeline .bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--accent-dim);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 0.5rem;
+  font-size: 0.7rem;
+  color: var(--bg);
+  white-space: nowrap;
+}
+.timeline .bar.shipped {
+  background: var(--accent);
+}
+.timeline .bar.unshipped {
+  background: var(--error);
+  opacity: 0.7;
+}
+.timeline .bar.in-progress {
+  background: var(--info);
+}
+
+/* Heatmap: 7 projects × 24 hours, CSS grid */
+.heatmap {
+  display: grid;
+  grid-template-columns: 12rem repeat(24, 1fr);
+  gap: 2px;
+  font-size: 0.7rem;
+  margin-top: 0.5rem;
+}
+.heatmap .hour-header {
+  color: var(--fg-dim);
+  text-align: center;
+  padding-top: 0.25rem;
+}
+.heatmap .project-cell {
+  color: var(--fg);
+  padding-right: 0.5rem;
+  text-align: right;
+  align-self: center;
+  font-size: 0.75rem;
+}
+.heatmap .cell {
+  aspect-ratio: 1 / 1;
+  background: var(--bg-elevated-2);
+  border-radius: 2px;
+}
+
+footer.status {
+  margin-top: 2rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  color: var(--fg-dim);
+  font-size: 0.75rem;
+  display: flex;
+  justify-content: space-between;
+}
