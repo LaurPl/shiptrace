@@ -2,8 +2,9 @@
 // to. Precedence (top wins):
 //  1. explicit --session flag
 //  2. $SHIPTRACE_SESSION_ID env var
-//  3. ~/.shiptrace/.current-session pointer file
-//  4. none -> unattributed
+//  3. per-project pointer at ~/.shiptrace/project-pointers/<hash>.json
+//  4. ~/.shiptrace/.current-session pointer file (manual recorder)
+//  5. none -> unattributed
 //
 // Conflicts between sources 1 and 2 are surfaced so the CLI can print the
 // "session conflict" warning. The point of the whole package is that
@@ -24,10 +25,11 @@ const EnvVar = "SHIPTRACE_SESSION_ID"
 type Source string
 
 const (
-	SourceFlag    Source = "flag"
-	SourceEnv     Source = "env"
-	SourcePointer Source = "pointer"
-	SourceNone    Source = "none"
+	SourceFlag           Source = "flag"
+	SourceEnv            Source = "env"
+	SourceProjectPointer Source = "project-pointer"
+	SourcePointer        Source = "pointer"
+	SourceNone           Source = "none"
 )
 
 // Conflict records a lower-precedence source that disagreed with the winner.
@@ -47,14 +49,32 @@ type Resolution struct {
 	Conflict *Conflict
 }
 
-// Resolve consults flag/env/pointer in precedence order. flagValue is whatever
-// the cobra command parsed from --session (empty string if unset). pointerPath
-// is the resolved path to the active-session marker (callers pass
-// paths.PointerPath()).
-func Resolve(flagValue, pointerPath string) (*Resolution, error) {
-	flag := flagValue
-	env := os.Getenv(EnvVar)
-	ptr, err := session.ReadActive(pointerPath)
+// Inputs bundles the precedence-chain sources so callers can fill in
+// whichever they have available. Empty paths and zero values are skipped.
+type Inputs struct {
+	FlagValue          string // --session flag
+	EnvValue           string // typically os.Getenv(EnvVar); read by Resolve when empty
+	ProjectPointerPath string // per-project pointer (CC's project pointer)
+	GlobalPointerPath  string // ~/.shiptrace/.current-session (manual recorder)
+	Now                time.Time
+	MaxStaleness       time.Duration // for pointer freshness; zero means accept any age
+}
+
+// Resolve consults the inputs in precedence order. Stale project pointers
+// (per Inputs.MaxStaleness) are skipped so a forgotten CC session doesn't
+// attribute tomorrow's `shiptrace ship`.
+func Resolve(in Inputs) (*Resolution, error) {
+	flag := in.FlagValue
+	env := in.EnvValue
+	if env == "" {
+		env = os.Getenv(EnvVar)
+	}
+
+	projectPtr, err := readPointerIfFresh(in.ProjectPointerPath, in.Now, in.MaxStaleness)
+	if err != nil {
+		return nil, err
+	}
+	globalPtr, err := readPointerIfFresh(in.GlobalPointerPath, in.Now, in.MaxStaleness)
 	if err != nil {
 		return nil, err
 	}
@@ -68,14 +88,38 @@ func Resolve(flagValue, pointerPath string) (*Resolution, error) {
 		return r, nil
 	case env != "":
 		return &Resolution{SessionID: env, Source: SourceEnv}, nil
-	case ptr != nil:
+	case projectPtr != nil:
 		return &Resolution{
-			SessionID: ptr.SessionID,
-			Label:     ptr.Label,
-			StartedAt: ptr.StartedAt,
+			SessionID: projectPtr.SessionID,
+			Label:     projectPtr.Label,
+			StartedAt: projectPtr.StartedAt,
+			Source:    SourceProjectPointer,
+		}, nil
+	case globalPtr != nil:
+		return &Resolution{
+			SessionID: globalPtr.SessionID,
+			Label:     globalPtr.Label,
+			StartedAt: globalPtr.StartedAt,
 			Source:    SourcePointer,
 		}, nil
 	default:
 		return &Resolution{Source: SourceNone}, nil
 	}
+}
+
+func readPointerIfFresh(path string, now time.Time, maxAge time.Duration) (*session.ActivePointer, error) {
+	if path == "" {
+		return nil, nil
+	}
+	p, err := session.ReadActive(path)
+	if err != nil {
+		return nil, err
+	}
+	if p == nil {
+		return nil, nil
+	}
+	if maxAge > 0 && p.IsStale(now, maxAge) {
+		return nil, nil
+	}
+	return p, nil
 }
