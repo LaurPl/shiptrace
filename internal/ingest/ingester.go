@@ -158,10 +158,12 @@ func (i *Ingester) dispatch(ctx context.Context, e events.Event) error {
 		return i.store.UpdateSessionStop(ctx, e)
 	case events.Ship:
 		return i.store.InsertShipEvent(ctx, e)
-	case events.Prompt, events.ToolUse, events.ReplanSignal:
-		// Day 2+ wires these up. For day 1, the checkpoint still advances so
-		// we don't reprocess them later.
-		return nil
+	case events.Prompt:
+		return i.store.BumpSessionPromptCount(ctx, e.SessionID)
+	case events.ToolUse:
+		return i.store.InsertToolEvent(ctx, e)
+	case events.ReplanSignal:
+		return i.store.InsertReplanSignal(ctx, e)
 	default:
 		i.logf("ingest: unknown event_type %q (skipped)", e.EventType)
 		return nil
