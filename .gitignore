@@ -1,0 +1,28 @@
+# Binaries
+/shiptrace
+/shiptrace-cc-hook
+/shiptrace-git-postcommit
+/bin/
+/dist/
+
+# Go
+*.test
+*.out
+*.prof
+/vendor/
+coverage.txt
+
+# Node / Vite (web dashboard)
+node_modules/
+/web/dist/
+.vite/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local data (in case the user runs shiptrace from the repo with SHIPTRACE_HOME=.)
+.shiptrace/
