@@ -155,7 +155,16 @@ func (i *Ingester) dispatch(ctx context.Context, e events.Event) error {
 	case events.SessionStart:
 		return i.store.UpsertSessionStart(ctx, e)
 	case events.SessionStop:
-		return i.store.UpdateSessionStop(ctx, e)
+		if err := i.store.UpdateSessionStop(ctx, e); err != nil {
+			return err
+		}
+		// Once we know the session ended, compute its replan score from
+		// whatever signals have been ingested so far. The dashboard reads
+		// the persisted score directly, so this is the moment to lock it in.
+		if _, err := i.store.ComputeAndStoreReplanScore(ctx, e.SessionID); err != nil {
+			i.logf("ingest: replan_score for %s: %v", e.SessionID, err)
+		}
+		return nil
 	case events.Ship:
 		return i.store.InsertShipEvent(ctx, e)
 	case events.Prompt:
