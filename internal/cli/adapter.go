@@ -10,10 +10,13 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/LaurPl/shiptrace/internal/adapters/filesystem"
 	"github.com/LaurPl/shiptrace/internal/adapters/git"
+	"github.com/LaurPl/shiptrace/internal/config"
 	"github.com/LaurPl/shiptrace/internal/eventlog"
 	"github.com/LaurPl/shiptrace/internal/events"
 	"github.com/LaurPl/shiptrace/internal/paths"
+	"github.com/LaurPl/shiptrace/internal/store"
 )
 
 // PostCommitBinaryName is the binary the git adapter installer looks for.
@@ -29,8 +32,118 @@ func newAdapterCommand(out, errOut io.Writer) *cobra.Command {
 		newAdapterUninstallCommand(out),
 		newAdapterStatusCommand(out),
 		newAdapterPRPollCommand(out, errOut),
+		newAdapterScanFSCommand(out, errOut),
 	)
 	return cmd
+}
+
+func newAdapterScanFSCommand(out, _ io.Writer) *cobra.Command {
+	var (
+		projectFilter string
+		extraPaths    []string
+		dryRun        bool
+	)
+	cmd := &cobra.Command{
+		Use:   "scan-fs",
+		Short: "Scan configured ship_paths for new files and emit attributed ship events",
+		Long:  "Reads ~/.shiptrace/config.yaml and walks each project's ship_paths. Files modified since the last scan are emitted as kind=file_landed ship events with file_overlap or time_window attribution.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			home, err := paths.Home()
+			if err != nil {
+				return err
+			}
+			configPath := filepath.Join(home, config.FileName)
+			cfg, err := config.Load(configPath)
+			if err != nil {
+				return err
+			}
+			shipPaths, projectNames := collectShipPaths(cfg, projectFilter)
+			shipPaths = append(shipPaths, extraPaths...)
+			if len(shipPaths) == 0 {
+				fmt.Fprintln(out, "no ship_paths configured (and no --path flags) — nothing to scan")
+				fmt.Fprintln(out, "  edit", configPath, "to add ship_paths under projects.<name>")
+				return nil
+			}
+			statePath := filepath.Join(home, filesystem.StateFileName)
+			state, err := filesystem.LoadState(statePath)
+			if err != nil {
+				return err
+			}
+			matches, err := filesystem.Scan(state, shipPaths)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "scanned %d ship_path(s); %d new/changed file(s)\n", len(shipPaths), len(matches))
+			if len(matches) == 0 {
+				return nil
+			}
+			if dryRun {
+				for _, m := range matches {
+					fmt.Fprintf(out, "  would emit: %s (mtime %s)\n", m.Path, m.Mtime.Format(time.RFC3339))
+				}
+				return nil
+			}
+
+			dbPath, err := paths.DBPath()
+			if err != nil {
+				return err
+			}
+			s, err := store.Open(dbPath)
+			if err != nil {
+				return err
+			}
+			defer s.Close()
+
+			eventsDir, err := paths.EventsDir()
+			if err != nil {
+				return err
+			}
+			w, err := eventlog.New(eventsDir)
+			if err != nil {
+				return err
+			}
+			defer w.Close()
+
+			emitted, err := filesystem.EmitShipEvents(cmd.Context(), w, s, matches, time.Now().UTC())
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "  emitted %d ship event(s)", emitted)
+			if len(projectNames) > 0 {
+				fmt.Fprintf(out, " from project(s): %v", projectNames)
+			}
+			fmt.Fprintln(out)
+
+			filesystem.MarkSeen(state, matches)
+			return filesystem.SaveState(statePath, state)
+		},
+	}
+	cmd.Flags().StringVar(&projectFilter, "project", "", "Limit scan to one project's ship_paths (default: all projects)")
+	cmd.Flags().StringSliceVar(&extraPaths, "path", nil, "Additional path or glob to scan (can repeat)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print what would be emitted without writing events")
+	return cmd
+}
+
+// collectShipPaths returns the union of configured ship_paths (filtered
+// by --project when set) plus the names of the projects contributing
+// them. The names list is used to enrich the user-facing summary line.
+func collectShipPaths(cfg *config.Config, projectFilter string) ([]string, []string) {
+	if cfg == nil {
+		return nil, nil
+	}
+	var paths []string
+	var names []string
+	for name, p := range cfg.Projects {
+		if projectFilter != "" && name != projectFilter {
+			continue
+		}
+		if len(p.ShipPaths) == 0 {
+			continue
+		}
+		paths = append(paths, p.ShipPaths...)
+		names = append(names, name)
+	}
+	return paths, names
 }
 
 func newAdapterInstallCommand(out io.Writer) *cobra.Command {
