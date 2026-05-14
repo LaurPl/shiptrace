@@ -30,3 +30,5 @@ node_modules/
 
 # Local data (in case the user runs shiptrace from the repo with SHIPTRACE_HOME=.)
 .shiptrace/
+# Dogfood dataset — synthetic, regenerable from scripts/dogfood-seed.
+.shiptrace-dogfood/
