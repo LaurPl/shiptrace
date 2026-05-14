@@ -94,5 +94,6 @@ MIT. Copyright (c) 2026 Laurentiu Emanuel Placinta.
 
 - [`docs/design.md`](docs/design.md) — architectural reasoning
 - [`docs/build-plan.md`](docs/build-plan.md) — the 7-day build sequence we followed
+- [`docs/implementation-walkthrough.md`](docs/implementation-walkthrough.md) — file-by-file tour of every package, mapped to the 7-day build
 - [`docs/privacy.md`](docs/privacy.md) — exactly what is and isn't captured
 - [`docs/adapters.md`](docs/adapters.md) — write your own ship adapter
