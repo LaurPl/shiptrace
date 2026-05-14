@@ -1,0 +1,1 @@
+// placeholder so //go:embed all:web/dist has something to embed when the React bundle hasn't been built yet
