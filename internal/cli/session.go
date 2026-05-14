@@ -97,7 +97,10 @@ func newSessionStopCommand(out io.Writer) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			r, err := attrib.Resolve(sessionFlag, pointerPath)
+			r, err := attrib.Resolve(attrib.Inputs{
+				FlagValue:         sessionFlag,
+				GlobalPointerPath: pointerPath,
+			})
 			if err != nil {
 				return err
 			}

@@ -45,7 +45,7 @@ func ShipResult(w io.Writer, c Color, r *attrib.Resolution, now time.Time) {
 		fmt.Fprintf(w, "%s Ship event logged unattributed (no active session). Use --session=ID or `shiptrace session start` first.\n",
 			c.Yellow("⚠"),
 		)
-	case attrib.SourcePointer:
+	case attrib.SourcePointer, attrib.SourceProjectPointer:
 		// We have a label and StartedAt — print the full friendly line.
 		fmt.Fprintf(w, "%s Ship event logged → session %q (%s, started %s)\n",
 			c.Green("✓"),

@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"io"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -12,6 +13,7 @@ import (
 	"github.com/LaurPl/shiptrace/internal/eventlog"
 	"github.com/LaurPl/shiptrace/internal/events"
 	"github.com/LaurPl/shiptrace/internal/paths"
+	"github.com/LaurPl/shiptrace/internal/session"
 )
 
 func newShipCommand(out io.Writer) *cobra.Command {
@@ -32,7 +34,14 @@ func newShipCommand(out io.Writer) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			r, err := attrib.Resolve(sessionFlag, pointerPath)
+			projectPointerPath, _ := resolveProjectPointerPath()
+			r, err := attrib.Resolve(attrib.Inputs{
+				FlagValue:          sessionFlag,
+				ProjectPointerPath: projectPointerPath,
+				GlobalPointerPath:  pointerPath,
+				Now:                time.Now().UTC(),
+				MaxStaleness:       session.DefaultMaxStaleness,
+			})
 			if err != nil {
 				return err
 			}
@@ -72,4 +81,20 @@ func newShipCommand(out io.Writer) *cobra.Command {
 	cmd.Flags().StringVar(&sessionFlag, "session", "", "Attribute this ship to a specific session ID")
 	cmd.Flags().StringVar(&kind, "kind", "manual", "Ship kind (manual | commit | publish | …)")
 	return cmd
+}
+
+// resolveProjectPointerPath returns the per-project pointer for the cwd,
+// or "" if it cannot be resolved (e.g. paths.Home() fails). Best-effort
+// for the attribution chain — the manual ship flow shouldn't error just
+// because shiptrace home isn't available.
+func resolveProjectPointerPath() (string, error) {
+	home, err := paths.Home()
+	if err != nil {
+		return "", err
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return session.ProjectPointerPath(home, cwd)
 }
