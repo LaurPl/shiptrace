@@ -49,12 +49,38 @@ func TestSessionMapGetMissingReturnsEmpty(t *testing.T) {
 
 func TestSessionMapRejectsPathTraversal(t *testing.T) {
 	m, _ := NewSessionMap(t.TempDir())
-	for _, bad := range []string{"", "../escape", "a/b", "..\\win", "..\\..\\etc"} {
+	for _, bad := range []string{
+		"",
+		".",
+		"..",
+		"../escape",
+		"a/b",
+		"..\\win",
+		"..\\..\\etc",
+		"/absolute",
+		"sub/../escape",
+		"contains\x00nul",
+	} {
 		if err := m.Set(bad, "shp_x"); err == nil {
 			t.Errorf("Set should reject %q", bad)
 		}
 		if _, err := m.Get(bad); err == nil {
 			t.Errorf("Get should reject %q", bad)
+		}
+	}
+}
+
+func TestSessionMapAcceptsRealisticUUIDs(t *testing.T) {
+	m, _ := NewSessionMap(t.TempDir())
+	// UUIDs and the kind of strings the dev style guide shows in CC payloads.
+	for _, good := range []string{
+		"550e8400-e29b-41d4-a716-446655440000",
+		"abc.123",          // dots are fine when they don't compose ".."
+		"some_session_id",
+		"aaa..bbb",         // double-dot mid-token used to over-reject; now passes
+	} {
+		if err := m.Set(good, "shp_test"); err != nil {
+			t.Errorf("Set rejected valid id %q: %v", good, err)
 		}
 	}
 }

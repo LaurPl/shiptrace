@@ -15,6 +15,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/LaurPl/shiptrace/internal/shellquote"
 )
 
 // HookEventName names a Claude Code hook event. We mirror the names CC uses
@@ -136,8 +138,12 @@ func (s *Settings) MergeShiptraceHooks(shiptraceBin string) int {
 		s.Hooks = map[HookEventName][]HookGroup{}
 	}
 	added := 0
+	quotedBin := shellquote.Quote(shiptraceBin)
 	for _, h := range ShiptraceHooks {
-		command := fmt.Sprintf("%s %s", shiptraceBin, h.Subcommand)
+		// Claude Code executes hook commands through /bin/sh, so we quote
+		// the binary path to defend against spaces, $, and backticks in the
+		// path that resolved at install time.
+		command := fmt.Sprintf("%s %s", quotedBin, h.Subcommand)
 		if alreadyInstalled(s.Hooks[h.Event], h.Matcher, command) {
 			continue
 		}
@@ -172,13 +178,15 @@ func alreadyInstalled(groups []HookGroup, matcher, fullCommand string) bool {
 
 // isShiptraceHookCommand recognizes any command whose basename starts with
 // "shiptrace-cc-hook", so a reinstall after the binary moved still
-// short-circuits.
+// short-circuits. Tolerates both legacy unquoted commands ("/path/shiptrace-cc-hook foo")
+// and the current single-quoted form ("'/path/shiptrace-cc-hook' foo").
 func isShiptraceHookCommand(cmd string) bool {
 	fields := strings.Fields(cmd)
 	if len(fields) == 0 {
 		return false
 	}
-	return strings.Contains(filepath.Base(fields[0]), "shiptrace-cc-hook")
+	head := strings.Trim(fields[0], "'\"")
+	return strings.Contains(filepath.Base(head), "shiptrace-cc-hook")
 }
 
 // HasShiptraceHooks reports whether all five shiptrace hook entries are

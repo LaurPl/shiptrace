@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/LaurPl/shiptrace/internal/shellquote"
 )
 
 // HookMarker is a magic string we embed in any post-commit hook we install
@@ -113,21 +115,24 @@ const (
 func buildManagedBlock(binaryPath string) string {
 	// `command -v ... > /dev/null` short-circuits when the binary moves
 	// away, and `|| true` ensures a missing recorder never fails the
-	// user's commit.
+	// user's commit. shellquote.Quote wraps each path in single quotes so
+	// $, backtick, and whitespace inside the path are treated as literals
+	// when /bin/sh executes the hook.
+	base := filepath.Base(binaryPath)
 	return fmt.Sprintf(
 		`%s
-if command -v %q >/dev/null 2>&1; then
+if command -v %s >/dev/null 2>&1; then
   %s || true
-elif [ -x %q ]; then
-  %q || true
+elif [ -x %s ]; then
+  %s || true
 fi
 %s
 `,
 		blockStartMarker,
-		filepath.Base(binaryPath),
-		filepath.Base(binaryPath),
-		binaryPath,
-		binaryPath,
+		shellquote.Quote(base),
+		shellquote.Quote(base),
+		shellquote.Quote(binaryPath),
+		shellquote.Quote(binaryPath),
 		blockEndMarker,
 	)
 }
@@ -188,15 +193,36 @@ func extractBinaryFromBlock(contents string) string {
 	block := contents[startIdx:endIdx]
 	for _, line := range strings.Split(block, "\n") {
 		line = strings.TrimSpace(line)
-		// Match the absolute-path arm: `elif [ -x "/full/path" ]; then`
+		// Match the absolute-path arm. Modern installs use single quotes
+		// (via shellquote.Quote); older installs may have double-quoted
+		// paths from before the shellquote migration. Try both.
 		if strings.HasPrefix(line, "elif [ -x ") {
-			// Cheap parse — quote-delimited path between the two `"`.
-			startQ := strings.Index(line, `"`)
-			endQ := strings.LastIndex(line, `"`)
-			if startQ >= 0 && endQ > startQ {
-				return line[startQ+1 : endQ]
+			if p := extractQuoted(line, '\''); p != "" {
+				return p
+			}
+			if p := extractQuoted(line, '"'); p != "" {
+				return p
 			}
 		}
 	}
 	return ""
+}
+
+// extractQuoted pulls the content between the first and last occurrence of q
+// in line. Used to extract a path from `elif [ -x '/foo/bar' ]; then`.
+// For single-quoted strings produced by shellquote.Quote, embedded single
+// quotes are represented as '\'' — we undo that here so the caller gets the
+// original byte sequence back.
+func extractQuoted(line string, q byte) string {
+	startQ := strings.IndexByte(line, q)
+	endQ := strings.LastIndexByte(line, q)
+	if startQ < 0 || endQ <= startQ {
+		return ""
+	}
+	inner := line[startQ+1 : endQ]
+	if q == '\'' {
+		// Reverse shellquote's '\'' encoding.
+		inner = strings.ReplaceAll(inner, `'\''`, "'")
+	}
+	return inner
 }

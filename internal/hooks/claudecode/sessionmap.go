@@ -77,14 +77,24 @@ func (m *SessionMap) Delete(ccID string) error {
 	return nil
 }
 
-// validateCCID guards against path traversal — a malicious or buggy CC
-// session_id with "/" or ".." in it should not let us write outside the
-// dir.
+// validateCCID guards against path traversal. A CC session id is used as a
+// single filename under cc-sessions/, so we require it to contain no path
+// separators (either OS), no NUL, and to be cross-OS local per
+// filepath.IsLocal (which rejects "..", absolute paths, and Windows reserved
+// names). IsLocal alone is too permissive because on Unix it lets "/" and
+// "\\" through as filename characters; the explicit separator check closes
+// that gap.
 func validateCCID(ccID string) error {
 	if ccID == "" {
 		return errors.New("claudecode: empty cc session id")
 	}
-	if strings.ContainsAny(ccID, "/\\") || strings.Contains(ccID, "..") {
+	if strings.ContainsRune(ccID, 0) {
+		return fmt.Errorf("claudecode: invalid cc session id (NUL byte)")
+	}
+	if strings.ContainsAny(ccID, `/\`) {
+		return fmt.Errorf("claudecode: invalid cc session id (path separator): %q", ccID)
+	}
+	if !filepath.IsLocal(ccID) {
 		return fmt.Errorf("claudecode: invalid cc session id: %q", ccID)
 	}
 	return nil
