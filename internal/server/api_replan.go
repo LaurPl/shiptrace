@@ -39,7 +39,7 @@ func (s *Server) handleReplanHeatmap(w http.ResponseWriter, r *http.Request) {
 		ORDER BY project ASC, hour ASC
 	`, cutoff)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, r, "replan-heatmap", err)
 		return
 	}
 	defer rows.Close()
@@ -52,14 +52,14 @@ func (s *Server) handleReplanHeatmap(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c ReplanCell
 		if err := rows.Scan(&c.Project, &c.Hour, &c.SessionCount, &c.MeanScore); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeInternalError(w, r, "replan-heatmap", err)
 			return
 		}
 		out.Cells = append(out.Cells, c)
 		projectsSet[c.Project] = struct{}{}
 	}
 	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, r, "replan-heatmap", err)
 		return
 	}
 	for p := range projectsSet {

@@ -36,7 +36,7 @@ func (s *Server) handleDistribution(w http.ResponseWriter, r *http.Request) {
 		ORDER BY sessions DESC
 	`, cutoff)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, r, "distribution", err)
 		return
 	}
 	defer rows.Close()
@@ -48,7 +48,7 @@ func (s *Server) handleDistribution(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var p DistributionProject
 		if err := rows.Scan(&p.Name, &p.Sessions, &p.Ships, &p.MeanReplanScore); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeInternalError(w, r, "distribution", err)
 			return
 		}
 		if p.Ships > 0 {
@@ -59,7 +59,7 @@ func (s *Server) handleDistribution(w http.ResponseWriter, r *http.Request) {
 		out.Projects = append(out.Projects, p)
 	}
 	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, r, "distribution", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, out)

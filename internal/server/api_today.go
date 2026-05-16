@@ -1,7 +1,6 @@
 package server
 
 import (
-	"database/sql"
 	"net/http"
 	"time"
 )
@@ -47,7 +46,7 @@ func (s *Server) handleToday(w http.ResponseWriter, r *http.Request) {
 		ORDER BY s.start_ts DESC
 	`, cutoff, cutoff)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, r, "today", err)
 		return
 	}
 	defer rows.Close()
@@ -65,17 +64,15 @@ func (s *Server) handleToday(w http.ResponseWriter, r *http.Request) {
 			&ts.PromptCount, &ts.ToolCallCount, &ts.ReplanScore,
 			&ts.ShipCount,
 		); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeInternalError(w, r, "today", err)
 			return
 		}
 		out.Sessions = append(out.Sessions, ts)
 	}
 	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, r, "today", err)
 		return
 	}
-	// Avoid the awkward zero-value when end_ts column is NULL but we
-	// COALESCE'd it to 0; the dashboard should treat 0 as "still running".
-	_ = sql.NullInt64{}
+	// COALESCE'd end_ts of 0 is the dashboard's "still running" sentinel.
 	writeJSON(w, http.StatusOK, out)
 }

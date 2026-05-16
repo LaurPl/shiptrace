@@ -8,7 +8,6 @@
 package server
 
 import (
-	"embed"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -24,12 +23,13 @@ const DefaultAddr = "127.0.0.1:7777"
 
 // Server is the HTTP front-end. One per process; create with New.
 type Server struct {
-	store   *store.Store
-	addr    string
-	mux     *http.ServeMux
-	bundle  fs.FS // the embedded web/dist tree (may be empty)
-	hasUI   bool
-	startup time.Time
+	store        *store.Store
+	addr         string
+	mux          *http.ServeMux
+	bundle       fs.FS // the embedded web/dist tree (may be empty)
+	hasUI        bool
+	startup      time.Time
+	allowAnyHost bool // set by Options.AllowAnyHost; bypasses the rebinding check
 }
 
 // Options bundles construction parameters.
@@ -37,6 +37,12 @@ type Options struct {
 	Addr   string
 	Store  *store.Store
 	Bundle fs.FS // optional — pass nil for API-only operation
+
+	// AllowAnyHost disables the loopback-host check. Only set this when the
+	// operator has explicitly opted into a public bind via --listen-public.
+	// Leaving it false is the local-first default that protects against DNS
+	// rebinding.
+	AllowAnyHost bool
 }
 
 // New constructs a Server but does not start it. ListenAndServe does.
@@ -49,10 +55,11 @@ func New(opts Options) (*Server, error) {
 		addr = DefaultAddr
 	}
 	s := &Server{
-		store:   opts.Store,
-		addr:    addr,
-		mux:     http.NewServeMux(),
-		startup: time.Now().UTC(),
+		store:        opts.Store,
+		addr:         addr,
+		mux:          http.NewServeMux(),
+		startup:      time.Now().UTC(),
+		allowAnyHost: opts.AllowAnyHost,
 	}
 	if opts.Bundle != nil {
 		// Embedded FS roots are positional: when we //go:embed web/dist,
@@ -71,16 +78,24 @@ func New(opts Options) (*Server, error) {
 // Addr returns the resolved address (may be useful in tests).
 func (s *Server) Addr() string { return s.addr }
 
-// Handler returns the underlying mux so callers (and tests) can use
-// httptest without binding a real port.
-func (s *Server) Handler() http.Handler { return s.mux }
+// Handler returns the wrapped HTTP handler chain (security headers +
+// Host-header guard + mux) that production callers should serve. Tests that
+// exercise a single handler in isolation can still hit s.mux directly to
+// bypass the middleware.
+func (s *Server) Handler() http.Handler {
+	var inner http.Handler = s.mux
+	if !s.allowAnyHost {
+		inner = requireLoopbackHost(inner)
+	}
+	return applySecurityHeaders(inner)
+}
 
 // ListenAndServe blocks; cancel via http.Server.Shutdown if you need
 // graceful teardown. For v0.1 the cobra command wires SIGINT/SIGTERM.
 func (s *Server) ListenAndServe() error {
 	srv := &http.Server{
 		Addr:              s.addr,
-		Handler:           s.mux,
+		Handler:           s.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	return srv.ListenAndServe()
@@ -149,6 +164,3 @@ go build -o /tmp/shiptrace ./cmd/shiptrace</code></pre>
 </html>`)
 }
 
-// Embed retained at the binary level (cmd/shiptrace) so this package
-// can be imported by tests without dragging in the bundle.
-var _ embed.FS // satisfies the import; the actual embed lives in cmd.

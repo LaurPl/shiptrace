@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -22,10 +23,21 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// writeError emits a uniform error JSON shape so the dashboard can show a
-// readable message in failure states.
+// writeError emits a uniform error JSON shape. The msg argument is the
+// client-facing string; for internal errors callers should use writeInternalError
+// instead so the underlying error is logged server-side rather than reflected
+// to the network.
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]any{"error": msg})
+}
+
+// writeInternalError logs err with context server-side and returns a generic
+// "internal error" response. Use this instead of writeError(w, 500, err.Error())
+// to avoid leaking SQLite or filesystem error strings to whoever can reach the
+// API (which, under --listen-public, can be anyone on the network).
+func writeInternalError(w http.ResponseWriter, r *http.Request, where string, err error) {
+	log.Printf("shiptrace server: %s %s: %s: %v", r.Method, r.URL.Path, where, err)
+	writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal error"})
 }
 
 // parseDays reads ?days=N from the request (default 30, capped at 365).
