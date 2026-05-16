@@ -84,3 +84,22 @@ func TestParsePayloadInvalidJSON(t *testing.T) {
 		t.Fatalf("expected error for invalid JSON")
 	}
 }
+
+// TestParsePayloadRefusesOversizedInput confirms the MaxPayloadBytes cap is
+// enforced. We synthesise a JSON object whose total size exceeds the cap by
+// padding a single value with spaces — cheap, deterministic.
+func TestParsePayloadRefusesOversizedInput(t *testing.T) {
+	prefix := `{"session_id":"cc-big","prompt":"`
+	suffix := `"}`
+	// Total body must exceed MaxPayloadBytes by at least one byte.
+	padLen := MaxPayloadBytes - len(prefix) - len(suffix) + 1
+	if padLen <= 0 {
+		t.Fatalf("padding length non-positive; cap=%d", MaxPayloadBytes)
+	}
+	body := prefix + strings.Repeat("a", padLen) + suffix
+	if _, err := ParsePayload(strings.NewReader(body)); err == nil {
+		t.Fatalf("expected error for payload exceeding %d bytes", MaxPayloadBytes)
+	} else if !strings.Contains(err.Error(), "exceeds") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 
 	_ "modernc.org/sqlite"
 )
@@ -25,8 +26,14 @@ type Store struct {
 func Open(path string) (*Store, error) {
 	// The "?_pragma=" trick lets modernc apply pragmas at connection time so
 	// every connection in the pool is consistent (WAL is per-DB but
-	// foreign_keys is per-connection).
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)&_pragma=busy_timeout(5000)", path)
+	// foreign_keys is per-connection). We URL-escape the path so a path
+	// containing '?', '#', '&', or '%' can't break out of the file: portion
+	// and inject additional pragmas. (PathEscape leaves '/' alone, which
+	// modernc.org/sqlite parses correctly.)
+	dsn := fmt.Sprintf(
+		"file:%s?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)&_pragma=busy_timeout(5000)",
+		url.PathEscape(path),
+	)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("store: open %s: %w", path, err)

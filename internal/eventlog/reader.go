@@ -11,6 +11,12 @@ import (
 	"github.com/LaurPl/shiptrace/internal/events"
 )
 
+// MaxLineBytes is the per-line cap for the JSONL scanner. Events are
+// typically <2 KiB; we set a generous 4 MiB ceiling so a malformed file with
+// a missing newline can't OOM the ingester before we can repair it. A line
+// hitting the cap returns a clear error pointing at the offset.
+const MaxLineBytes = 4 << 20
+
 // ScanFile reads path starting at startOffset and invokes fn for every
 // well-formed JSON line. fn receives the parsed event and the byte offset of
 // the first byte AFTER that line; persisting that offset is how the ingester
@@ -36,6 +42,13 @@ func ScanFile(path string, startOffset int64, fn func(e events.Event, nextOffset
 
 	for {
 		line, err := r.ReadBytes('\n')
+		if len(line) > MaxLineBytes {
+			// A pathologically long line (likely a corrupted file with no
+			// newline for many MB) would otherwise grow bufio's buffer
+			// without bound. Refuse with the offset of the bad line so the
+			// caller can repair it manually.
+			return offset, fmt.Errorf("eventlog: %s @%d: line exceeds %d bytes (file may be corrupted; trim or split it manually)", path, offset, MaxLineBytes)
+		}
 		if len(line) > 0 {
 			// Track only complete lines (terminated by \n). A trailing partial
 			// line means the writer is mid-append; we leave the offset at the

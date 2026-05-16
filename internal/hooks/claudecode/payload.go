@@ -10,8 +10,16 @@ package claudecode
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 )
+
+// MaxPayloadBytes is the largest hook payload we'll buffer from stdin. CC
+// payloads are typically a few KB; we cap at 8 MiB to bound memory on the
+// 30ms hot path while still leaving headroom for an unusually large
+// TodoWrite or tool_response. Anything bigger is more likely a runaway
+// child process than a real hook event.
+const MaxPayloadBytes = 8 << 20
 
 // HookPayload is the union of fields shiptrace cares about across hook
 // events. Claude Code includes many more fields per event type; we
@@ -47,6 +55,11 @@ type HookPayload struct {
 	// ToolName / ToolInput / ToolResponse populate PostToolUse. ToolInput
 	// is the raw JSON CC was about to invoke the tool with; ToolResponse
 	// is the result. We hash ToolInput and never log it verbatim by default.
+	//
+	// ToolResponse is parsed into this struct ONLY so that the unknown-keys
+	// extras map doesn't capture it. No handler reads it; it is never
+	// hashed, logged, or persisted. Tool outputs can contain file contents
+	// and we treat them as out-of-scope by design. See docs/privacy.md.
 	ToolName     string          `json:"tool_name,omitempty"`
 	ToolInput    json.RawMessage `json:"tool_input,omitempty"`
 	ToolResponse json.RawMessage `json:"tool_response,omitempty"`
@@ -62,10 +75,20 @@ type HookPayload struct {
 // ParsePayload decodes the CC hook JSON from r into a HookPayload. It
 // preserves unknown top-level fields in Extras so we can surface them in
 // metadata when useful. A trailing newline is tolerated.
+//
+// Reads are capped at MaxPayloadBytes. A payload that hits the cap is
+// refused rather than silently truncated, because a half-parsed JSON would
+// yield an event whose semantics nobody could vouch for.
 func ParsePayload(r io.Reader) (*HookPayload, error) {
-	raw, err := io.ReadAll(r)
+	// LimitReader+1: read up to MaxPayloadBytes; if there's still more to
+	// read after that, the input exceeded the cap and we abort.
+	lr := io.LimitReader(r, MaxPayloadBytes+1)
+	raw, err := io.ReadAll(lr)
 	if err != nil {
 		return nil, err
+	}
+	if int64(len(raw)) > MaxPayloadBytes {
+		return nil, fmt.Errorf("claudecode: hook payload exceeds %d bytes — refusing to parse", MaxPayloadBytes)
 	}
 	var extras map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &extras); err != nil {

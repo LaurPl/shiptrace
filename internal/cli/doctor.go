@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -150,10 +152,24 @@ func checkLatency(ctx context.Context, samples int) checkResult {
 
 	durations := make([]time.Duration, 0, samples)
 	for i := 0; i < samples; i++ {
+		// Build the synthetic payload via json.Marshal so the path in `tmp`
+		// — which on Windows is full of backslashes that JSON treats as
+		// escapes — round-trips correctly.
+		payload, err := json.Marshal(struct {
+			SessionID string `json:"session_id"`
+			Cwd       string `json:"cwd"`
+		}{
+			SessionID: fmt.Sprintf("doctor-%d", i),
+			Cwd:       tmp,
+		})
+		if err != nil {
+			return checkResult{"hook latency", "✗", fmt.Sprintf("marshal payload: %v", err)}
+		}
+
 		start := time.Now()
 		cmd := exec.CommandContext(ctx, bin, "session-start")
 		cmd.Env = append(os.Environ(), "SHIPTRACE_HOME="+tmp)
-		cmd.Stdin = strings.NewReader(fmt.Sprintf(`{"session_id":"doctor-%d","cwd":"%s"}`, i, tmp))
+		cmd.Stdin = bytes.NewReader(payload)
 		var stderr strings.Builder
 		cmd.Stderr = &stderr
 		if err := cmd.Run(); err != nil {

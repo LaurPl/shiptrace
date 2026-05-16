@@ -100,6 +100,32 @@ func TestAppendErrorsWhenDirMissing(t *testing.T) {
 	}
 }
 
+func TestAppendCreatesFileWithRestrictivePerms(t *testing.T) {
+	dir := t.TempDir()
+	w, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+	if err := w.Append(events.Event{EventType: events.SessionStart, SessionID: "shp_perm"}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	today := time.Now().UTC().Format("2006-01-02")
+	info, err := os.Stat(filepath.Join(dir, today+".jsonl"))
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	// Permissions on Windows behave differently; skip the assertion there.
+	if got := info.Mode().Perm(); got != 0o600 {
+		// On some filesystems (e.g. NTFS via WSL) the perm bits are virtual;
+		// gate the assertion on Unix-like environments by checking that the
+		// "other-readable" bit is at least off.
+		if got&0o004 != 0 {
+			t.Errorf("eventlog file is world-readable, mode = %o", got)
+		}
+	}
+}
+
 func TestCloseIdempotent(t *testing.T) {
 	w, err := New(t.TempDir())
 	if err != nil {
