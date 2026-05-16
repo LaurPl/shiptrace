@@ -23,12 +23,13 @@ Privacy is a design constraint, not an afterthought. This document tells you exa
 | Prompt SHA-256 hash | ✓ | JSONL only | One-way. Cannot be inverted. |
 | Tool name (`Edit`, `Bash`, `TodoWrite`, …) | ✓ | SQLite + JSONL | Identity of the action, not its payload. |
 | Tool input SHA-256 hash | ✓ | JSONL only | Same as prompt hash. |
-| `files_touched` paths | ✓ | SQLite + JSONL | Extracted from common tool-input shapes (`file_path`, `path`). |
+| `files_touched` paths | ✓ | SQLite + JSONL | Extracted from common tool-input shapes — the recorder probes `file_path`, `path`, `filename`, and the `files` array, in that order. |
 | TodoWrite status counts (pending / in_progress / completed) | ✓ | SQLite (replan_signals) + JSONL | Counts only — no item text. |
 | Pivot-phrase matches (`"actually"`, `"scrap that"`, …) | ✓ | SQLite (replan_signals) + JSONL | The matched phrase, not the full prompt. |
 | Token counts (in / out) | ✓ when provider supplies them | SQLite + JSONL | A small number. |
 | Commit SHAs and author | ✓ when git adapter is installed | SQLite (ship_events) + JSONL | From `git log -1`. |
 | Ship-event descriptions | ✓ when you type them | SQLite + JSONL | You typed them yourself. |
+| `tool_response` (the tool's output) | ✗ never | — | Parsed into the hook payload struct so the unknown-keys map doesn't collect it, then immediately discarded. Not logged, not hashed, never crosses the recorder boundary. Tool outputs can carry file contents and we treat them as out-of-scope by design. |
 | **Verbatim prompt text** | ✗ opt-in | JSONL only | `SHIPTRACE_LOG_PROMPT_TEXT=1` |
 | **Verbatim tool input** | ✗ opt-in | JSONL only | `SHIPTRACE_LOG_TOOL_INPUT=1` |
 

@@ -222,6 +222,63 @@ func TestHandleToolUseEmitsToolEvent(t *testing.T) {
 	}
 }
 
+// TestHandleToolUseExtractsAllFourPathFields pins the documented surface of
+// files_touched extraction (see docs/privacy.md). If we ever shrink or grow
+// this set, the privacy doc and this test must move together.
+func TestHandleToolUseExtractsAllFourPathFields(t *testing.T) {
+	h := newHarness(t)
+	_ = h.handler.HandleSessionStart(&HookPayload{SessionID: "cc-paths", Cwd: "/x"})
+
+	input := json.RawMessage(`{
+		"file_path": "/x/a.go",
+		"path":      "/x/b.go",
+		"filename":  "/x/c.go",
+		"files":     ["/x/d.go", "/x/e.go"]
+	}`)
+	if err := h.handler.HandleToolUse(&HookPayload{
+		SessionID: "cc-paths",
+		ToolName:  "MultiEdit",
+		ToolInput: input,
+	}); err != nil {
+		t.Fatalf("HandleToolUse: %v", err)
+	}
+	toolEv := h.readEvents()[1]
+	want := []string{"/x/a.go", "/x/b.go", "/x/c.go", "/x/d.go", "/x/e.go"}
+	if len(toolEv.FilesTouched) != len(want) {
+		t.Fatalf("FilesTouched count: got %d want %d (%v)", len(toolEv.FilesTouched), len(want), toolEv.FilesTouched)
+	}
+	for i, p := range want {
+		if toolEv.FilesTouched[i] != p {
+			t.Errorf("FilesTouched[%d] = %q, want %q", i, toolEv.FilesTouched[i], p)
+		}
+	}
+}
+
+// TestHandleToolUseDoesNotLogToolResponse confirms the "read but discard"
+// contract in payload.go's HookPayload struct comment: tool_response goes
+// nowhere — not the metadata map, not FilesTouched, not the hash field.
+func TestHandleToolUseDoesNotLogToolResponse(t *testing.T) {
+	h := newHarness(t)
+	_ = h.handler.HandleSessionStart(&HookPayload{SessionID: "cc-resp", Cwd: "/x"})
+
+	if err := h.handler.HandleToolUse(&HookPayload{
+		SessionID:    "cc-resp",
+		ToolName:     "Read",
+		ToolInput:    json.RawMessage(`{"file_path":"/x/secret.txt"}`),
+		ToolResponse: json.RawMessage(`{"contents":"SUPER SECRET CONTENT"}`),
+	}); err != nil {
+		t.Fatalf("HandleToolUse: %v", err)
+	}
+	toolEv := h.readEvents()[1]
+	body, _ := json.Marshal(toolEv)
+	if strings.Contains(string(body), "SUPER SECRET CONTENT") {
+		t.Errorf("tool_response content leaked into event:\n%s", body)
+	}
+	if _, ok := toolEv.Metadata["tool_response"]; ok {
+		t.Errorf("tool_response key present in metadata")
+	}
+}
+
 func TestHandleToolUseTodoWriteEmitsReplanSignal(t *testing.T) {
 	h := newHarness(t)
 	_ = h.handler.HandleSessionStart(&HookPayload{SessionID: "cc-uuid-5", Cwd: "/x"})

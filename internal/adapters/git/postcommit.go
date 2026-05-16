@@ -10,6 +10,7 @@ package git
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -39,6 +40,11 @@ type CommitMetadata struct {
 // CollectCommitMetadata shells out to git from inside repoDir and returns
 // the metadata for HEAD. The caller is expected to pass an absolute path
 // or a directory git can resolve.
+//
+// Optional fields (author, subject, files-touched, shortstat) use
+// runGitOptional, which swallows failures by default but logs them to
+// stderr when SHIPTRACE_DEBUG=1 — useful when a corrupted repo silently
+// produces empty ship events.
 func CollectCommitMetadata(repoDir string) (*CommitMetadata, error) {
 	sha, err := runGit(repoDir, "rev-parse", "HEAD")
 	if err != nil {
@@ -48,13 +54,13 @@ func CollectCommitMetadata(repoDir string) (*CommitMetadata, error) {
 	if err != nil {
 		return nil, fmt.Errorf("git: rev-parse --short: %w", err)
 	}
-	author, _ := runGit(repoDir, "log", "-1", "--format=%an")
-	subject, _ := runGit(repoDir, "log", "-1", "--format=%s")
+	author := runGitOptional(repoDir, "log", "-1", "--format=%an")
+	subject := runGitOptional(repoDir, "log", "-1", "--format=%s")
 	// `git show --name-only` handles both the initial commit (no parent)
 	// and ordinary commits, unlike `git diff-tree HEAD` which produces
 	// nothing on the initial commit.
-	filesRaw, _ := runGit(repoDir, "show", "--name-only", "--format=", "HEAD")
-	statsRaw, _ := runGit(repoDir, "show", "--shortstat", "--format=", "HEAD")
+	filesRaw := runGitOptional(repoDir, "show", "--name-only", "--format=", "HEAD")
+	statsRaw := runGitOptional(repoDir, "show", "--shortstat", "--format=", "HEAD")
 
 	m := &CommitMetadata{
 		SHA:      sha,
@@ -125,6 +131,20 @@ func runGit(dir string, args ...string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// runGitOptional wraps runGit for callers who never want a failure to abort
+// the hook. On success it returns the trimmed stdout; on failure it returns
+// "" and, when SHIPTRACE_DEBUG=1, writes a one-line diagnostic to stderr so
+// a user investigating an empty ship event can see what git complained
+// about. The post-commit hook must not print to stdout under any
+// circumstances — that breaks shell composability with other hooks.
+func runGitOptional(dir string, args ...string) string {
+	out, err := runGit(dir, args...)
+	if err != nil && os.Getenv("SHIPTRACE_DEBUG") == "1" {
+		fmt.Fprintf(os.Stderr, "shiptrace git: %v (args=%v)\n", err, args)
+	}
+	return out
 }
 
 // BuildShipEvent assembles a normalized ship event from commit metadata.
