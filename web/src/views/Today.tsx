@@ -34,52 +34,58 @@ function sessionBar(s: TodaySession, windowStart: number, windowEnd: number) {
 
 export default function Today() {
   const state = useLoader(() => api.today(), []);
+
+  // All hooks live at the top of the component so React sees the same call
+  // count on every render. LoaderBoundary's children render-prop only runs
+  // when status is "ok" — calling hooks inside it would make hook count
+  // depend on loader state and violate the Rules of Hooks.
+  const rawSessions = state.data?.sessions;
+  const sessions = useMemo(
+    () =>
+      rawSessions
+        ? [...rawSessions].sort((a, b) => a.start_ts - b.start_ts)
+        : [],
+    [rawSessions],
+  );
+
+  const windowEnd = Math.floor(Date.now() / 1000);
+  const windowStart = windowEnd - 24 * 3600;
+  const shipped = sessions.filter((s) => s.ship_count > 0).length;
+  const inProgress = sessions.filter(
+    (s) => !s.end_ts || s.end_ts <= 0,
+  ).length;
+  const ratio =
+    shipped > 0 ? (sessions.length / shipped).toFixed(2) : "—";
+
   return (
     <LoaderBoundary
       state={state}
       empty={(d) => d.sessions.length === 0}
     >
-      {(data) => {
-        const windowEnd = Math.floor(Date.now() / 1000);
-        const windowStart = windowEnd - 24 * 3600;
-        const sessions = useMemo(
-          () => [...data.sessions].sort((a, b) => a.start_ts - b.start_ts),
-          [data.sessions],
-        );
-        const shipped = sessions.filter((s) => s.ship_count > 0).length;
-        const inProgress = sessions.filter(
-          (s) => !s.end_ts || s.end_ts <= 0,
-        ).length;
-        const ratio =
-          shipped > 0 ? (sessions.length / shipped).toFixed(2) : "—";
-
-        return (
-          <>
-            <div className="card">
-              <h2>Today — last 24 hours</h2>
-              <div className="subtitle">
-                {sessions.length} session{sessions.length === 1 ? "" : "s"} ·{" "}
-                {shipped} shipped · {inProgress} in progress ·{" "}
-                sessions-to-ship&nbsp;{ratio}
-              </div>
-              {sessions.map((s) => (
-                <div className="timeline" key={s.id}>
-                  <div className="label">
-                    <div className="title">{s.label || s.id}</div>
-                    <div className="meta">
-                      {s.project || "(no project)"} · {s.provider}
-                      {s.replan_score > 0
-                        ? ` · replan ${s.replan_score.toFixed(2)}`
-                        : ""}
-                    </div>
-                  </div>
-                  {sessionBar(s, windowStart, windowEnd)}
+      {() => (
+        <div className="card">
+          <h2>Today — last 24 hours</h2>
+          <div className="subtitle">
+            {sessions.length} session{sessions.length === 1 ? "" : "s"} ·{" "}
+            {shipped} shipped · {inProgress} in progress ·{" "}
+            sessions-to-ship&nbsp;{ratio}
+          </div>
+          {sessions.map((s) => (
+            <div className="timeline" key={s.id}>
+              <div className="label">
+                <div className="title">{s.label || s.id}</div>
+                <div className="meta">
+                  {s.project || "(no project)"} · {s.provider}
+                  {s.replan_score > 0
+                    ? ` · replan ${s.replan_score.toFixed(2)}`
+                    : ""}
                 </div>
-              ))}
+              </div>
+              {sessionBar(s, windowStart, windowEnd)}
             </div>
-          </>
-        );
-      }}
+          ))}
+        </div>
+      )}
     </LoaderBoundary>
   );
 }
