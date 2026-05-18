@@ -2,6 +2,7 @@ package git
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -157,5 +158,47 @@ func TestIsInstalled(t *testing.T) {
 func TestInstallRejectsNonRepo(t *testing.T) {
 	if _, err := InstallPostCommit(t.TempDir(), "/path/x"); err == nil {
 		t.Errorf("expected error when .git/hooks missing")
+	}
+}
+
+// TestInstallQuotesShellHostilePaths confirms that paths containing $,
+// backtick, single quotes, or spaces don't cause /bin/sh to expand them when
+// the hook runs. We pass `sh -n` (syntax-only) to assert the script parses,
+// and round-trip through IsInstalled to confirm we can recover the path.
+func TestInstallQuotesShellHostilePaths(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	hostile := []string{
+		"/usr/local/bin/shiptrace-git-postcommit",
+		`/tmp/path with space/shiptrace-git-postcommit`,
+		`/tmp/$(echo evil)/shiptrace-git-postcommit`,
+		"/tmp/`whoami`/shiptrace-git-postcommit",
+		"/tmp/has'single'quote/shiptrace-git-postcommit",
+	}
+	for _, p := range hostile {
+		t.Run(p, func(t *testing.T) {
+			repo := newRepoSkeleton(t)
+			if _, err := InstallPostCommit(repo, p); err != nil {
+				t.Fatalf("install: %v", err)
+			}
+			hookPath := filepath.Join(repo, ".git", "hooks", HookFileName)
+			// Syntax-check the generated hook with `sh -n`.
+			if out, err := exec.Command("sh", "-n", hookPath).CombinedOutput(); err != nil {
+				body, _ := os.ReadFile(hookPath)
+				t.Fatalf("sh -n failed: %v\noutput: %s\nhook:\n%s", err, out, body)
+			}
+			// Round-trip through IsInstalled.
+			installed, recovered, err := IsInstalled(repo)
+			if err != nil {
+				t.Fatalf("IsInstalled: %v", err)
+			}
+			if !installed {
+				t.Errorf("expected installed=true")
+			}
+			if recovered != p {
+				t.Errorf("path round-trip:\n  set: %q\n  got: %q", p, recovered)
+			}
+		})
 	}
 }

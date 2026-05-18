@@ -20,6 +20,8 @@
 #   SHIPTRACE_INSTALL_DIR — install dir (default: ~/.local/bin or /usr/local/bin)
 #   SHIPTRACE_LOCAL_DIST — install from a local dist tree (dev mode)
 #   SHIPTRACE_RUN_INIT=1 — run `shiptrace init` after install
+#   SHIPTRACE_SKIP_CHECKSUM=1 — bypass SHA256SUMS verification (NOT recommended;
+#       intended for dev runs against a local dist that omits SHA256SUMS)
 
 set -eu
 
@@ -27,6 +29,7 @@ REPO="LaurPl/shiptrace"
 VERSION="${SHIPTRACE_VERSION:-latest}"
 LOCAL_DIST="${SHIPTRACE_LOCAL_DIST:-}"
 RUN_INIT="${SHIPTRACE_RUN_INIT:-0}"
+SKIP_CHECKSUM="${SHIPTRACE_SKIP_CHECKSUM:-0}"
 
 color() { printf "%s" "$1"; }
 green="$(printf '\033[32m')"
@@ -129,10 +132,42 @@ download() {
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL --proto '=https' "$url" -o "$out"
   elif command -v wget >/dev/null 2>&1; then
-    wget -qO "$out" "$url"
+    # --https-only refuses non-HTTPS, so a hostile redirect can't downgrade
+    # the transport. We do NOT fall back to plain wget on failure: a network
+    # error and a downgrade attempt are indistinguishable to us here, and
+    # silently accepting plaintext would defeat the point.
+    wget --https-only -qO "$out" "$url"
   else
     fail "need curl or wget to download $url"
   fi
+}
+
+# verify_checksum confirms that archive matches the entry for its basename in
+# checksums_file. Returns 0 on match, non-zero on mismatch or missing entry.
+# Refuses to silently pass when no shasum/sha256sum binary is available — the
+# whole point is verification, so we abort instead of pretending.
+verify_checksum() {
+  archive="$1"; checksums_file="$2"
+  base="$(basename "$archive")"
+  expected="$(grep -E "[[:space:]]\\./?${base}\$|[[:space:]]${base}\$" "$checksums_file" \
+    | awk '{print $1}' | head -1)"
+  if [ -z "$expected" ]; then
+    fail "no SHA256 entry for $base in SHA256SUMS"
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    actual="$(shasum -a 256 "$archive" | awk '{print $1}')"
+  elif command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "$archive" | awk '{print $1}')"
+  else
+    fail "need shasum or sha256sum to verify $base — install one or rerun with SHIPTRACE_SKIP_CHECKSUM=1 (NOT recommended)"
+  fi
+  if [ "$actual" != "$expected" ]; then
+    fail "SHA256 mismatch for $base
+  expected: $expected
+  got:      $actual
+This release may be compromised. Refusing to install."
+  fi
+  ok "verified $base ($expected)"
 }
 
 install_from_local() {
@@ -144,6 +179,13 @@ install_from_local() {
   if [ -z "$archive" ]; then
     fail "no archive matching ${os}-${arch} under $src"
   fi
+  if [ "$SKIP_CHECKSUM" = "1" ]; then
+    warn "SHIPTRACE_SKIP_CHECKSUM=1 — installing $(basename "$archive") without verification"
+  elif [ -f "$src/SHA256SUMS" ]; then
+    verify_checksum "$archive" "$src/SHA256SUMS"
+  else
+    fail "no SHA256SUMS under $src; rerun with SHIPTRACE_SKIP_CHECKSUM=1 to bypass (NOT recommended)"
+  fi
   extract_and_place "$archive" "$dest" "$os"
 }
 
@@ -153,11 +195,19 @@ install_from_release() {
   ext="tar.gz"
   [ "$os" = "windows" ] && ext="zip"
   archive_name="shiptrace-${resolved}-${os}-${arch}.${ext}"
-  url="https://github.com/$REPO/releases/download/${resolved}/${archive_name}"
-  ok "downloading $url"
+  archive_url="https://github.com/$REPO/releases/download/${resolved}/${archive_name}"
+  sums_url="https://github.com/$REPO/releases/download/${resolved}/SHA256SUMS"
+  ok "downloading $archive_url"
   tmp="$(mktemp -d 2>/dev/null || mktemp -d -t shiptrace-install)"
   trap 'rm -rf "$tmp"' EXIT
-  download "$url" "$tmp/$archive_name"
+  download "$archive_url" "$tmp/$archive_name"
+  if [ "$SKIP_CHECKSUM" = "1" ]; then
+    warn "SHIPTRACE_SKIP_CHECKSUM=1 — installing without verification"
+  else
+    ok "downloading $sums_url"
+    download "$sums_url" "$tmp/SHA256SUMS"
+    verify_checksum "$tmp/$archive_name" "$tmp/SHA256SUMS"
+  fi
   extract_and_place "$tmp/$archive_name" "$dest" "$os"
 }
 

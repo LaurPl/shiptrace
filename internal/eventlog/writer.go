@@ -110,7 +110,11 @@ func (w *Writer) ensureFileLocked(eventTs time.Time) error {
 		w.date = ""
 	}
 	path := filepath.Join(w.dir, date+".jsonl")
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	// 0o600 keeps the eventlog readable only to the owner. The parent dir is
+	// already 0o700 so this is belt-and-braces — but tarballs, rsync, and
+	// accidental `chmod o+x ~` all preserve file modes, so the tight mode
+	// matters for any data that leaves this directory in flight.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("eventlog: open %s: %w", path, err)
 	}

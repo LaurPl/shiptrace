@@ -3,6 +3,7 @@ package ccsettings
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -117,6 +118,58 @@ func TestMergePreservesUnrelatedHooks(t *testing.T) {
 	}
 	if !foundOther {
 		t.Errorf("user's existing Stop hook was dropped")
+	}
+}
+
+// TestMergeQuotesShellHostileBinaryPaths confirms that paths with shell
+// metacharacters end up as a single literal argv[0] when /bin/sh parses
+// the resulting command string — defending against the case where CC
+// executes the hook command through a shell.
+func TestMergeQuotesShellHostileBinaryPaths(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	for _, p := range []string{
+		"/usr/local/bin/shiptrace-cc-hook",
+		"/tmp/path with space/shiptrace-cc-hook",
+		"/tmp/$(echo evil)/shiptrace-cc-hook",
+		"/tmp/`whoami`/shiptrace-cc-hook",
+	} {
+		t.Run(p, func(t *testing.T) {
+			s := &Settings{}
+			s.MergeShiptraceHooks(p)
+			cmd := s.Hooks[SessionStart][0].Hooks[0].Command
+			// Use `sh -c 'set -- <cmd>; printf %s\n "$1"'` to extract the
+			// first shell token; assert it equals p verbatim.
+			script := "set -- " + cmd + `; printf %s "$1"`
+			out, err := exec.Command("sh", "-c", script).Output()
+			if err != nil {
+				t.Fatalf("sh failed for %s: %v", cmd, err)
+			}
+			if string(out) != p {
+				t.Errorf("first token mismatch:\n  expected: %q\n  got:      %q\n  command:  %s", p, string(out), cmd)
+			}
+		})
+	}
+}
+
+// TestMergeIdempotentAcrossQuotingStyles confirms that an existing install
+// using the legacy unquoted command string is recognized on reinstall, so
+// users who installed before the shellquote migration don't end up with
+// duplicate entries.
+func TestMergeIdempotentAcrossQuotingStyles(t *testing.T) {
+	s := &Settings{
+		Hooks: map[HookEventName][]HookGroup{
+			SessionStart: {{Hooks: []Hook{{
+				Type:    "command",
+				Command: "/usr/local/bin/shiptrace-cc-hook session-start", // legacy unquoted form
+			}}}},
+		},
+	}
+	added := s.MergeShiptraceHooks("/usr/local/bin/shiptrace-cc-hook")
+	// 4 added (the other four events); SessionStart already present.
+	if added != 4 {
+		t.Errorf("expected 4 added (SessionStart recognized as legacy), got %d", added)
 	}
 }
 

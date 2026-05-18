@@ -184,6 +184,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// Refuse to seed into a SHIPTRACE_HOME that looks like a live install.
+	// Forging events into a real home is irreversible by intent (the
+	// eventlog is append-only) and would pollute the user's analytics.
+	if err := guardDogfoodHome(home); err != nil {
+		return err
+	}
 	eventsDir, err := paths.EventsDir()
 	if err != nil {
 		return err
@@ -496,3 +502,29 @@ func repoRoot() string {
 
 // Compile-time guard against an embed import we no longer need.
 var _ = json.Marshal
+
+// guardDogfoodHome refuses to run unless SHIPTRACE_HOME points somewhere
+// that looks deliberately sandboxed for synthetic data. We require either:
+//
+//   - the env var is set and contains the substring "dogfood", or
+//   - the SHIPTRACE_DOGFOOD_I_KNOW_WHAT_IM_DOING=1 escape hatch is set.
+//
+// The seeder writes irreversibly into the eventlog; mistaking a live home
+// for a sandbox would poison the user's session-to-ship analytics.
+func guardDogfoodHome(home string) error {
+	if os.Getenv("SHIPTRACE_DOGFOOD_I_KNOW_WHAT_IM_DOING") == "1" {
+		return nil
+	}
+	env := os.Getenv("SHIPTRACE_HOME")
+	if env == "" {
+		return fmt.Errorf("dogfood-seed refuses to write into %s without an explicit SHIPTRACE_HOME.\n"+
+			"set SHIPTRACE_HOME=./.shiptrace-dogfood (or similar) first, then re-run.\n"+
+			"to override: SHIPTRACE_DOGFOOD_I_KNOW_WHAT_IM_DOING=1", home)
+	}
+	if !strings.Contains(env, "dogfood") {
+		return fmt.Errorf("dogfood-seed refuses to write into SHIPTRACE_HOME=%q because the path doesn't look sandboxed.\n"+
+			"include the substring 'dogfood' in the path (e.g. ./.shiptrace-dogfood) so accidents stay visible.\n"+
+			"to override: SHIPTRACE_DOGFOOD_I_KNOW_WHAT_IM_DOING=1", env)
+	}
+	return nil
+}

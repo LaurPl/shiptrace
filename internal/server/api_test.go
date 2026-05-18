@@ -1,11 +1,14 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -179,6 +182,44 @@ func TestApiVersion(t *testing.T) {
 	srv.mux.ServeHTTP(w, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status: %d", w.Code)
+	}
+}
+
+// TestInternalErrorDoesNotLeakUnderlying confirms that when a handler hits
+// the store after we've closed it, the response carries the generic
+// "internal error" string — not the SQLite driver's error text. The
+// underlying detail still goes to the test logger so debugging stays cheap.
+func TestInternalErrorDoesNotLeakUnderlying(t *testing.T) {
+	srv := newServer(t)
+	// Pump the log to a buffer so we can assert the detail was logged.
+	var buf bytes.Buffer
+	orig := log.Default().Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(orig) })
+
+	// Close the store under the server's feet to force a DB error.
+	_ = srv.store.Close()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/today", nil)
+	r.Host = "127.0.0.1:7777"
+	srv.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status: %d body=%s", w.Code, w.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["error"] != "internal error" {
+		t.Errorf("expected generic error, got %q", body["error"])
+	}
+	// SQLite error text should be in the log, not the response.
+	if strings.Contains(w.Body.String(), "sql") || strings.Contains(w.Body.String(), "database") {
+		t.Errorf("response leaked DB internals: %s", w.Body.String())
+	}
+	if !strings.Contains(buf.String(), "today") {
+		t.Errorf("server log missing the error context: %s", buf.String())
 	}
 }
 

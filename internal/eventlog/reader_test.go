@@ -123,3 +123,44 @@ func TestScanFileMissingFileErrors(t *testing.T) {
 		t.Fatalf("expected error for missing file")
 	}
 }
+
+// TestScanFileRefusesOversizedLine confirms the MaxLineBytes cap fires when
+// a corrupted file is missing newlines for too long. We synthesize one giant
+// line followed by a valid line — the scanner should fail on the giant line
+// without OOMing on the read path.
+func TestScanFileRefusesOversizedLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "big.jsonl")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// One line of MaxLineBytes+1 bytes (no newline yet) then a newline.
+	pad := make([]byte, MaxLineBytes+1)
+	for i := range pad {
+		pad[i] = 'x'
+	}
+	if _, err := f.Write(pad); err != nil {
+		t.Fatalf("write pad: %v", err)
+	}
+	if _, err := f.WriteString("\n"); err != nil {
+		t.Fatalf("write nl: %v", err)
+	}
+	_ = f.Close()
+
+	_, err = ScanFile(path, 0, func(events.Event, int64) error { return nil })
+	if err == nil {
+		t.Fatalf("expected error for oversized line")
+	}
+	if !contains(err.Error(), "exceeds") {
+		t.Errorf("unexpected error text: %v", err)
+	}
+}
+
+func contains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}

@@ -27,12 +27,12 @@ func (s *Server) handleAgentSkillROI(w http.ResponseWriter, r *http.Request) {
 
 	byAgent, err := s.aggregateAgentSkill(r, cutoff, "agent")
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, r, "agent-skill-roi", err)
 		return
 	}
 	bySkill, err := s.aggregateAgentSkill(r, cutoff, "skill")
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, r, "agent-skill-roi", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, AgentSkillResponse{

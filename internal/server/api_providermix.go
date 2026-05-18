@@ -34,7 +34,7 @@ func (s *Server) handleProviderMix(w http.ResponseWriter, r *http.Request) {
 		ORDER BY sessions DESC
 	`, cutoff)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, r, "provider-mix", err)
 		return
 	}
 	defer rows.Close()
@@ -46,7 +46,7 @@ func (s *Server) handleProviderMix(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var p ProviderRow
 		if err := rows.Scan(&p.Name, &p.Sessions, &p.Ships); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeInternalError(w, r, "provider-mix", err)
 			return
 		}
 		if p.Ships > 0 {
@@ -55,7 +55,7 @@ func (s *Server) handleProviderMix(w http.ResponseWriter, r *http.Request) {
 		out.Providers = append(out.Providers, p)
 	}
 	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeInternalError(w, r, "provider-mix", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
