@@ -60,7 +60,10 @@ func requireLoopbackHost(next http.Handler) http.Handler {
 		// no-port "[::1]" gets through unchanged. Normalize.
 		host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
 		if _, ok := loopbackHosts[host]; !ok {
-			http.Error(w, "shiptrace: this dashboard refuses non-loopback Host headers (DNS rebinding protection). Got: "+r.Host, http.StatusMisdirectedRequest)
+			// Don't echo r.Host back: it's attacker-controlled and would turn
+			// this error page into a small reflection surface. The actual
+			// value is in the access log if anyone needs to debug.
+			http.Error(w, "shiptrace: this dashboard refuses non-loopback Host headers (DNS rebinding protection).", http.StatusMisdirectedRequest)
 			return
 		}
 		next.ServeHTTP(w, r)

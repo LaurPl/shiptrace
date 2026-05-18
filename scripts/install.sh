@@ -132,9 +132,11 @@ download() {
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL --proto '=https' "$url" -o "$out"
   elif command -v wget >/dev/null 2>&1; then
-    # wget's --https-only refuses non-HTTPS so a hostile redirect can't downgrade.
-    wget --https-only -qO "$out" "$url" 2>/dev/null \
-      || wget -qO "$out" "$url"
+    # --https-only refuses non-HTTPS, so a hostile redirect can't downgrade
+    # the transport. We do NOT fall back to plain wget on failure: a network
+    # error and a downgrade attempt are indistinguishable to us here, and
+    # silently accepting plaintext would defeat the point.
+    wget --https-only -qO "$out" "$url"
   else
     fail "need curl or wget to download $url"
   fi
