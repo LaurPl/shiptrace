@@ -1,17 +1,10 @@
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { api } from "../api";
 import { LoaderBoundary, useLoader } from "../components/Loader";
+import { BarComparisonChart, ChartPalette } from "../components/Chart";
+import { HelpHint } from "../components/HelpHint";
 
-const ACCENT = "#6ab04c";
-const ACCENT_DIM = "#4a7d35";
+const SHIP_DEFINITION =
+  "a ship is a recorded shipping signal (manual `shiptrace ship`, git commit, deploy hook). sessions-to-ship is the ratio of work sessions to shipped artifacts in the window.";
 
 export default function ProviderMix() {
   const state = useLoader(() => api.providerMix(30), []);
@@ -20,31 +13,38 @@ export default function ProviderMix() {
       {(data) => (
         <>
           <div className="card">
-            <h2>provider mix</h2>
+            <h2>
+              provider mix <HelpHint text={SHIP_DEFINITION} />
+            </h2>
             <div className="subtitle">
               last {data.window_days} day{data.window_days === 1 ? "" : "s"}
             </div>
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart
+            {data.providers.length === 1 ? (
+              <ProviderSummary
+                name={data.providers[0].name}
+                sessions={data.providers[0].sessions}
+                ships={data.providers[0].ships}
+              />
+            ) : (
+              <BarComparisonChart
                 data={data.providers}
-                margin={{ top: 8, right: 32, left: 8, bottom: 8 }}
-              >
-                <CartesianGrid stroke="#2a2a2a" strokeDasharray="3 3" />
-                <XAxis dataKey="name" stroke="#888" fontSize={11} tickLine={false} />
-                <YAxis stroke="#888" fontSize={11} tickLine={false} />
-                <Tooltip
-                  cursor={{ fill: "#1c1c1c" }}
-                  contentStyle={{
-                    background: "#141414",
-                    border: "1px solid #2a2a2a",
-                    fontFamily: "monospace",
-                    fontSize: 12,
-                  }}
-                />
-                <Bar dataKey="sessions" fill={ACCENT_DIM} name="sessions" />
-                <Bar dataKey="ships" fill={ACCENT} name="ships" />
-              </BarChart>
-            </ResponsiveContainer>
+                categoryKey="name"
+                layout="horizontal"
+                height={260}
+                series={[
+                  {
+                    key: "sessions",
+                    label: "sessions",
+                    color: ChartPalette.accentDim,
+                  },
+                  {
+                    key: "ships",
+                    label: "ships",
+                    color: ChartPalette.accent,
+                  },
+                ]}
+              />
+            )}
           </div>
 
           <div className="card">
@@ -77,5 +77,41 @@ export default function ProviderMix() {
         </>
       )}
     </LoaderBoundary>
+  );
+}
+
+// ProviderSummary replaces the bar chart when there's only one provider.
+// A single-row "mix" is just a count — the chart contributes nothing.
+function ProviderSummary({
+  name,
+  sessions,
+  ships,
+}: {
+  name: string;
+  sessions: number;
+  ships: number;
+}) {
+  return (
+    <div className="provider-summary">
+      <div className="provider-summary-row">
+        <span className="provider-summary-label">{name}</span>
+        <span className="provider-summary-stat">
+          <span className="provider-summary-num">{sessions}</span>
+          <span className="provider-summary-unit">
+            session{sessions === 1 ? "" : "s"}
+          </span>
+        </span>
+        <span className="provider-summary-stat">
+          <span className="provider-summary-num">{ships}</span>
+          <span className="provider-summary-unit">
+            ship{ships === 1 ? "" : "s"}
+          </span>
+        </span>
+      </div>
+      <div className="provider-summary-note">
+        only one provider in this window — chart is suppressed until at least
+        two are present.
+      </div>
+    </div>
   );
 }

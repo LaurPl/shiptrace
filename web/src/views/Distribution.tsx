@@ -1,17 +1,6 @@
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { api } from "../api";
 import { LoaderBoundary, useLoader } from "../components/Loader";
-
-const ACCENT = "#6ab04c";
-const ACCENT_DIM = "#4a7d35";
+import { BarComparisonChart, ChartPalette } from "../components/Chart";
 
 export default function Distribution() {
   const state = useLoader(() => api.distribution(30), []);
@@ -25,6 +14,7 @@ export default function Distribution() {
         const rows = data.projects.filter(
           (p) => p.sessions > 0 || p.ships > 0,
         );
+        const noShips = rows.every((p) => p.ships === 0);
         return (
           <>
             <div className="card">
@@ -33,44 +23,29 @@ export default function Distribution() {
                 last {data.window_days} day{data.window_days === 1 ? "" : "s"} ·
                 lower = tighter shipping discipline
               </div>
-              <ResponsiveContainer width="100%" height={Math.max(220, rows.length * 36)}>
-                <BarChart
+              {noShips ? (
+                <div className="empty">
+                  no ships in window — run <code>shiptrace ship</code> after a
+                  commit to start measuring sessions-to-ship.
+                </div>
+              ) : (
+                <BarComparisonChart
                   data={rows}
-                  layout="vertical"
-                  margin={{ top: 8, right: 32, left: 8, bottom: 8 }}
-                >
-                  <CartesianGrid stroke="#2a2a2a" strokeDasharray="3 3" />
-                  <XAxis
-                    type="number"
-                    stroke="#888"
-                    tickLine={false}
-                    fontSize={11}
-                  />
-                  <YAxis
-                    type="category"
-                    dataKey="name"
-                    stroke="#888"
-                    width={130}
-                    tickLine={false}
-                    fontSize={11}
-                  />
-                  <Tooltip
-                    cursor={{ fill: "#1c1c1c" }}
-                    contentStyle={{
-                      background: "#141414",
-                      border: "1px solid #2a2a2a",
-                      fontFamily: "monospace",
-                      fontSize: 12,
-                    }}
-                  />
-                  <Bar
-                    dataKey="sessions"
-                    fill={ACCENT_DIM}
-                    name="sessions"
-                  />
-                  <Bar dataKey="ships" fill={ACCENT} name="ships" />
-                </BarChart>
-              </ResponsiveContainer>
+                  categoryKey="name"
+                  series={[
+                    {
+                      key: "sessions",
+                      label: "sessions",
+                      color: ChartPalette.accentDim,
+                    },
+                    {
+                      key: "ships",
+                      label: "ships",
+                      color: ChartPalette.accent,
+                    },
+                  ]}
+                />
+              )}
             </div>
 
             <div className="card">
