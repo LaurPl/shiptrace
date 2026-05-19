@@ -1,9 +1,22 @@
 import { useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, TodaySession } from "../api";
 import { LoaderBoundary, useLoader } from "../components/Loader";
+import { LegendStrip } from "../components/LegendStrip";
 
 const HOURS_IN_WINDOW = 24;
 const TICK_HOURS = 4;
+
+// isEmptySession is the same predicate the row meta uses to tag a session
+// "empty": no work recorded between start and stop. We use it to filter
+// rows and to colour the pip neutrally instead of red (red is for real
+// unshipped work).
+function isEmptySession(s: TodaySession): boolean {
+  const inProgress = !s.end_ts || s.end_ts <= 0;
+  if (inProgress) return false;
+  const dur = s.end_ts! - s.start_ts;
+  return dur === 0 && s.prompt_count === 0 && s.tool_call_count === 0;
+}
 
 function fmtDuration(s: number) {
   if (s <= 0) return "—";
@@ -88,6 +101,7 @@ function sessionBar(
   let stateCls = "";
   if (inProgress) stateCls = "in-progress";
   else if (s.ship_count > 0) stateCls = "shipped";
+  else if (isEmptySession(s)) stateCls = "empty";
   else stateCls = "unshipped";
 
   if (isPip) {
@@ -170,21 +184,48 @@ function TimeAxis({
   );
 }
 
+const LEGEND_ITEMS = [
+  { label: "shipped", color: "var(--accent)" },
+  { label: "unshipped", color: "var(--error)" },
+  { label: "in progress", color: "var(--info)" },
+  { label: "empty (no work recorded)", color: "var(--fg-dim)" },
+];
+
 export default function Today() {
   const state = useLoader(() => api.today(), []);
+  const [params, setParams] = useSearchParams();
+  // Default: empty sessions are hidden. The user opts in to see them via
+  // `?empty=1` so install-boundary phantoms don't drown the real signal.
+  const showEmpty = params.get("empty") === "1";
 
   // All hooks live at the top of the component so React sees the same call
   // count on every render. LoaderBoundary's children render-prop only runs
   // when status is "ok" — calling hooks inside it would make hook count
   // depend on loader state and violate the Rules of Hooks.
   const rawSessions = state.data?.sessions;
-  const sessions = useMemo(
+  const allSessions = useMemo(
     () =>
       rawSessions
         ? [...rawSessions].sort((a, b) => a.start_ts - b.start_ts)
         : [],
     [rawSessions],
   );
+
+  const emptyCount = useMemo(
+    () => allSessions.filter(isEmptySession).length,
+    [allSessions],
+  );
+  const sessions = useMemo(
+    () => (showEmpty ? allSessions : allSessions.filter((s) => !isEmptySession(s))),
+    [allSessions, showEmpty],
+  );
+
+  const toggleEmpty = () => {
+    const next = new URLSearchParams(params);
+    if (showEmpty) next.delete("empty");
+    else next.set("empty", "1");
+    setParams(next, { replace: true });
+  };
 
   const windowEnd = Math.floor(Date.now() / 1000);
   const windowStart = windowEnd - HOURS_IN_WINDOW * 3600;
@@ -207,7 +248,27 @@ export default function Today() {
             {sessions.length} session{sessions.length === 1 ? "" : "s"} ·{" "}
             {shipped} shipped · {inProgress} in progress ·{" "}
             sessions-to-ship&nbsp;{ratio}
+            {emptyCount > 0 && (
+              <>
+                {" · "}
+                <button
+                  type="button"
+                  className="inline-toggle"
+                  onClick={toggleEmpty}
+                  title={
+                    showEmpty
+                      ? "Hide sessions that recorded no work"
+                      : "Show sessions that recorded no work"
+                  }
+                >
+                  {showEmpty
+                    ? `hide ${emptyCount} empty`
+                    : `show ${emptyCount} empty`}
+                </button>
+              </>
+            )}
           </div>
+          <LegendStrip items={LEGEND_ITEMS} />
           {sessions.map((s) => (
             <div className="timeline" key={s.id}>
               <div className="label">

@@ -108,6 +108,74 @@ nav.tabs a:hover {
   margin-bottom: 0.75rem;
 }
 
+/* Inline "show/hide N empty" button inside .subtitle. Styled to read
+   as a link, not a button, but kept semantic for keyboard users. */
+button.inline-toggle {
+  background: none;
+  border: none;
+  color: var(--accent);
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+}
+button.inline-toggle:hover {
+  text-decoration: underline;
+}
+
+/* Legend row above the timeline / below the heatmap. Small, dense,
+   read-only — there's no interaction on the chips. */
+.legend-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  font-size: 0.75rem;
+  color: var(--fg-dim);
+  margin: 0.5rem 0 0.75rem;
+}
+.legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.legend-chip-color {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 2px;
+  border: 1px solid var(--bg);
+}
+
+/* Gradient legend used by the replan heatmap to anchor the colour scale
+   against numeric replan-score breakpoints (0.0 / 0.5 / 1.0). */
+.gradient-legend {
+  margin-top: 0.75rem;
+  font-size: 0.7rem;
+  color: var(--fg-dim);
+}
+.gradient-bar {
+  height: 6px;
+  border-radius: 3px;
+}
+.gradient-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.2rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Variance banner inside the replan card: same colour vocab as .empty
+   but inline-positioned so it sits above the (still-rendered) grid. */
+.variance-banner {
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.78rem;
+  color: var(--fg-dim);
+  margin-bottom: 0.6rem;
+}
+
 .empty {
   color: var(--fg-dim);
   padding: 1.5rem;
@@ -216,6 +284,21 @@ table.data .id {
 }
 .timeline .bar.in-progress {
   background: var(--info);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.timeline .bar.empty {
+  background: var(--fg-dim);
+  opacity: 0.55;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
 }
 
 /* Pip: a session with no measurable duration (start == end). Anchored at
@@ -241,6 +324,11 @@ table.data .id {
 }
 .timeline .bar-pip.in-progress {
   background: var(--info);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.timeline .bar-pip.empty {
+  background: var(--fg-dim);
+  opacity: 0.6;
 }
 
 /* Time axis below the bars. Mirrors the .timeline grid so ticks line up
