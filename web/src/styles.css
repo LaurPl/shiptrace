@@ -484,3 +484,151 @@ footer.status {
   display: flex;
   justify-content: space-between;
 }
+
+/* Clickable timeline row: hover lifts the background. The keyboard
+   focus ring uses the accent colour so it's discoverable. */
+.timeline.timeline-clickable {
+  cursor: pointer;
+}
+.timeline.timeline-clickable:hover {
+  background: var(--bg-elevated-2);
+}
+.timeline.timeline-clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Session drawer: full-height slide-in panel anchored on the right,
+   backdrop dimmed to focus attention. The backdrop captures clicks
+   to close; the panel stops propagation. */
+.session-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 50;
+  display: flex;
+  justify-content: flex-end;
+}
+.session-drawer {
+  width: min(640px, 100vw);
+  height: 100%;
+  background: var(--bg-elevated);
+  border-left: 1px solid var(--border);
+  padding: 1.25rem 1.5rem;
+  overflow-y: auto;
+  animation: drawerSlideIn 0.18s ease-out;
+}
+@keyframes drawerSlideIn {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+.session-drawer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.session-drawer-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+.session-drawer-title h2 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--fg);
+  word-break: break-all;
+}
+.session-drawer-close {
+  background: none;
+  border: none;
+  color: var(--fg-dim);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.4rem;
+}
+.session-drawer-close:hover {
+  color: var(--fg);
+}
+.session-drawer-meta {
+  display: grid;
+  grid-template-columns: 6rem 1fr;
+  row-gap: 0.35rem;
+  column-gap: 0.75rem;
+  margin: 0 0 1rem;
+  font-size: 0.82rem;
+}
+.session-drawer-meta dt {
+  color: var(--fg-dim);
+  text-transform: lowercase;
+}
+.session-drawer-meta dd {
+  margin: 0;
+  color: var(--fg);
+}
+.session-drawer-mono {
+  font-size: 0.75rem;
+  word-break: break-all;
+  color: var(--fg-dim);
+}
+.session-drawer-h3 {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--fg-dim);
+  margin: 1rem 0 0.5rem;
+}
+.session-drawer-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.8rem;
+}
+.session-drawer-timeline .timeline-entry {
+  display: grid;
+  grid-template-columns: 5rem 4rem 1fr;
+  column-gap: 0.5rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--bg-elevated-2);
+  align-items: baseline;
+}
+.session-drawer-timeline .timeline-entry:last-child {
+  border-bottom: none;
+}
+.timeline-entry-ts {
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+.timeline-entry-category {
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  letter-spacing: 0.5px;
+  color: var(--fg-dim);
+}
+.timeline-entry-tool .timeline-entry-category {
+  color: var(--info);
+}
+.timeline-entry-replan .timeline-entry-category {
+  color: var(--warn);
+}
+.timeline-entry-ship .timeline-entry-category {
+  color: var(--accent);
+}
+.timeline-entry-primary {
+  color: var(--fg);
+}
+.timeline-entry-secondary {
+  display: block;
+  grid-column: 3;
+  color: var(--fg-dim);
+  font-size: 0.72rem;
+  margin-top: 0.15rem;
+  word-break: break-all;
+}

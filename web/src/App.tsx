@@ -7,6 +7,7 @@ import ReplanHeatmap from "./views/ReplanHeatmap";
 import AgentSkillROI from "./views/AgentSkillROI";
 import ProviderMix from "./views/ProviderMix";
 import GlobalBanner from "./components/GlobalBanner";
+import SessionDrawer from "./components/SessionDrawer";
 
 function Nav() {
   const tabs = [
@@ -70,6 +71,7 @@ export default function App() {
         <Route path="/provider" element={<ProviderMix />} />
       </Routes>
       <StatusFooter />
+      <SessionDrawer />
     </div>
   );
 }
