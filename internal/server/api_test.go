@@ -175,6 +175,71 @@ func TestApiReplanHeatmap(t *testing.T) {
 	}
 }
 
+// TestApiSessionReturnsDetail seeds a session with a tool_use, a
+// replan_signal, and a ship_event, then asserts /api/session/{id}
+// returns all three streams in ts order under the right keys.
+func TestApiSessionReturnsDetail(t *testing.T) {
+	srv := newServer(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Unix()
+
+	seedSession(t, srv.store, "shp_detail", "social", "ig-strat", "claude-code", now-1000, now-100, 1)
+
+	if err := srv.store.InsertToolEvent(ctx, events.Event{
+		EventType:    events.ToolUse,
+		Ts:           time.Unix(now-800, 0).UTC(),
+		SessionID:    "shp_detail",
+		Tool:         "Read",
+		FilesTouched: []string{"a.go", "b.go"},
+	}.WithDefaults()); err != nil {
+		t.Fatalf("seed tool: %v", err)
+	}
+	if err := srv.store.InsertReplanSignal(ctx, events.Event{
+		EventType: events.ReplanSignal,
+		Ts:        time.Unix(now-500, 0).UTC(),
+		SessionID: "shp_detail",
+		Metadata:  map[string]any{"kind": "todo_revoked", "weight": 0.5},
+	}.WithDefaults()); err != nil {
+		t.Fatalf("seed replan: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/session/shp_detail", nil)
+	srv.mux.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: %d body=%s", w.Code, w.Body.String())
+	}
+	var resp SessionDetailResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Session.ID != "shp_detail" {
+		t.Errorf("session.id: %q", resp.Session.ID)
+	}
+	if len(resp.ToolEvents) != 1 || resp.ToolEvents[0].Tool != "Read" {
+		t.Errorf("tool_events: %+v", resp.ToolEvents)
+	}
+	if got := resp.ToolEvents[0].FilesTouched; len(got) != 2 || got[0] != "a.go" {
+		t.Errorf("files_touched round-trip: %+v", got)
+	}
+	if len(resp.ReplanSignals) != 1 || resp.ReplanSignals[0].Kind != "todo_revoked" {
+		t.Errorf("replan_signals: %+v", resp.ReplanSignals)
+	}
+	if len(resp.ShipEvents) != 1 {
+		t.Errorf("ship_events: %+v", resp.ShipEvents)
+	}
+}
+
+func TestApiSessionUnknownReturns404(t *testing.T) {
+	srv := newServer(t)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/session/does-not-exist", nil)
+	srv.mux.ServeHTTP(w, r)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown session, got %d (body=%s)", w.Code, w.Body.String())
+	}
+}
+
 func TestApiHealthReportsShipPresence(t *testing.T) {
 	srv := newServer(t)
 	now := time.Now().UTC().Unix()

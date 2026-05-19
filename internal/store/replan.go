@@ -11,6 +11,47 @@ import (
 	"github.com/LaurPl/shiptrace/internal/replan"
 )
 
+// ReplanSignalRow is the read shape returned by ListReplanSignals. The
+// metadata column comes back as raw JSON bytes so the server can pass
+// it through to the dashboard without re-marshaling.
+type ReplanSignalRow struct {
+	SessionID string
+	Ts        int64
+	Kind      string
+	Weight    float64
+	Metadata  []byte
+}
+
+// ListReplanSignals returns the per-session replan_signal rows in ts order.
+// Empty slice when the session has no signals. Separate from the
+// package-internal loadReplanSignals which decodes back into the
+// scoring-domain Signal type; this list helper is for read-only display.
+func (s *Store) ListReplanSignals(ctx context.Context, sessionID string) ([]ReplanSignalRow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT session_id, ts, kind, weight, COALESCE(metadata, '')
+		FROM replan_signals
+		WHERE session_id = ?
+		ORDER BY ts ASC
+	`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("store: query replan_signals: %w", err)
+	}
+	defer rows.Close()
+	out := make([]ReplanSignalRow, 0)
+	for rows.Next() {
+		var r ReplanSignalRow
+		var meta string
+		if err := rows.Scan(&r.SessionID, &r.Ts, &r.Kind, &r.Weight, &meta); err != nil {
+			return nil, fmt.Errorf("store: scan replan_signal: %w", err)
+		}
+		if meta != "" {
+			r.Metadata = []byte(meta)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // ComputeAndStoreReplanScore loads every replan_signal for sessionID,
 // computes the score, and writes it back to sessions.replan_score.
 // Intended to be called once per session at session_stop ingestion time.
