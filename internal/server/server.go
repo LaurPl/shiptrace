@@ -109,6 +109,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/replan-heatmap", s.handleReplanHeatmap)
 	s.mux.HandleFunc("/api/agent-skill-roi", s.handleAgentSkillROI)
 	s.mux.HandleFunc("/api/provider-mix", s.handleProviderMix)
+	s.mux.HandleFunc("/api/health", s.handleHealth)
 	s.mux.HandleFunc("/api/version", s.handleVersion)
 
 	// Static bundle. If absent (Go build without `cd web && npm run

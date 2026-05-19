@@ -34,7 +34,7 @@ func (s *Server) handleReplanHeatmap(w http.ResponseWriter, r *http.Request) {
 			COUNT(*) AS session_count,
 			AVG(s.replan_score) AS mean_score
 		FROM sessions s
-		WHERE s.start_ts >= ?
+		WHERE s.start_ts >= ?`+phantomFilter(r)+`
 		GROUP BY project, hour
 		ORDER BY project ASC, hour ASC
 	`, cutoff)

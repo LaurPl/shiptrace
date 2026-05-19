@@ -6,6 +6,7 @@ import Distribution from "./views/Distribution";
 import ReplanHeatmap from "./views/ReplanHeatmap";
 import AgentSkillROI from "./views/AgentSkillROI";
 import ProviderMix from "./views/ProviderMix";
+import GlobalBanner from "./components/GlobalBanner";
 
 function Nav() {
   const tabs = [
@@ -58,6 +59,7 @@ export default function App() {
           local dashboard · localhost:7777
         </span>
       </header>
+      <GlobalBanner />
       <Nav />
       <Routes>
         <Route path="/" element={<Navigate to="/today" replace />} />

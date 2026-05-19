@@ -29,7 +29,7 @@ func (s *Server) handleProviderMix(w http.ResponseWriter, r *http.Request) {
 			COUNT(DISTINCT s.id) AS sessions,
 			COALESCE(SUM((SELECT COUNT(*) FROM ship_events WHERE session_id = s.id)), 0) AS ships
 		FROM sessions s
-		WHERE s.start_ts >= ?
+		WHERE s.start_ts >= ?`+phantomFilter(r)+`
 		GROUP BY s.provider
 		ORDER BY sessions DESC
 	`, cutoff)

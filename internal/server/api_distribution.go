@@ -31,7 +31,7 @@ func (s *Server) handleDistribution(w http.ResponseWriter, r *http.Request) {
 			COALESCE(SUM((SELECT COUNT(*) FROM ship_events WHERE session_id = s.id)), 0) AS ships,
 			AVG(s.replan_score) AS mean_replan_score
 		FROM sessions s
-		WHERE s.start_ts >= ?
+		WHERE s.start_ts >= ?`+phantomFilter(r)+`
 		GROUP BY project
 		ORDER BY sessions DESC
 	`, cutoff)

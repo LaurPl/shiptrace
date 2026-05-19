@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/LaurPl/shiptrace/internal/store"
 )
 
 // defaultLookback is the time window used by every endpoint that doesn't
@@ -70,4 +72,15 @@ func (s *Server) handleVersion(w http.ResponseWriter, _ *http.Request) {
 // hoursRange formats a window for log lines / error messages.
 func hoursRange(days int) string {
 	return fmt.Sprintf("last %d day(s)", days)
+}
+
+// phantomFilter returns the SQL fragment that excludes phantom sessions
+// from aggregate queries. The empty string is returned when the caller
+// has opted into seeing phantoms via `?include_phantoms=1`. See
+// store.PhantomFilterSQL for the rationale.
+func phantomFilter(r *http.Request) string {
+	if r.URL.Query().Get("include_phantoms") == "1" {
+		return ""
+	}
+	return store.PhantomFilterSQL
 }

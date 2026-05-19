@@ -8,6 +8,7 @@ import (
 
 	"github.com/LaurPl/shiptrace/internal/eventlog"
 	"github.com/LaurPl/shiptrace/internal/events"
+	"github.com/LaurPl/shiptrace/internal/project"
 	"github.com/LaurPl/shiptrace/internal/session"
 )
 
@@ -325,11 +326,12 @@ func defaultLabel(now time.Time, cwd string) string {
 	return fmt.Sprintf("claude-code @ %s — %s", base, now.Format("2006-01-02 15:04"))
 }
 
+// projectFromCwd resolves the canonical project name. Worktree paths
+// (CC's .claude/worktrees and git's `git worktree add` pointers) fold
+// into the parent project so the dashboard doesn't surface every
+// worktree as its own one-off project. See internal/project.Normalize.
 func projectFromCwd(cwd string) string {
-	if cwd == "" {
-		return ""
-	}
-	return filepath.Base(cwd)
+	return project.Normalize(cwd)
 }
 
 // extractFilesTouched returns a best-effort list of files referenced by the

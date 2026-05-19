@@ -175,6 +175,29 @@ func TestApiReplanHeatmap(t *testing.T) {
 	}
 }
 
+func TestApiHealthReportsShipPresence(t *testing.T) {
+	srv := newServer(t)
+	now := time.Now().UTC().Unix()
+
+	// Empty store: no ships.
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/health", nil))
+	var resp HealthResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.HasShips {
+		t.Errorf("expected has_ships=false on empty store, got %+v", resp)
+	}
+
+	// Add a ship and recheck.
+	seedSession(t, srv.store, "shp_x", "p", "", "claude-code", now-1000, now-500, 1)
+	w = httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/health", nil))
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if !resp.HasShips {
+		t.Errorf("expected has_ships=true after seeding a ship, got %+v", resp)
+	}
+}
+
 func TestApiVersion(t *testing.T) {
 	srv := newServer(t)
 	w := httptest.NewRecorder()
@@ -221,6 +244,96 @@ func TestInternalErrorDoesNotLeakUnderlying(t *testing.T) {
 	if !strings.Contains(buf.String(), "today") {
 		t.Errorf("server log missing the error context: %s", buf.String())
 	}
+}
+
+// TestPhantomSessionsExcludedFromAggregates seeds one phantom (start==end,
+// zero counts) and one real session in the same project, then asserts
+// the phantom doesn't inflate session counts on any aggregate endpoint
+// unless include_phantoms=1 is set.
+func TestPhantomSessionsExcludedFromAggregates(t *testing.T) {
+	srv := newServer(t)
+	now := time.Now().UTC().Unix()
+	// Phantom: ingester wrote start==stop with no prompts/tools.
+	seedSession(t, srv.store, "shp_phantom", "ghost", "", "claude-code", now-500, now-500, 0)
+	// Real: nonzero duration, ship attached.
+	seedSession(t, srv.store, "shp_real", "ghost", "", "claude-code", now-1000, now-400, 1)
+
+	t.Run("today omits phantom by default", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		srv.mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/today", nil))
+		var resp TodayResponse
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		if len(resp.Sessions) != 1 || resp.Sessions[0].ID != "shp_real" {
+			t.Fatalf("expected only shp_real, got %+v", resp.Sessions)
+		}
+	})
+
+	t.Run("today includes phantom with opt-in", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		srv.mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/today?include_phantoms=1", nil))
+		var resp TodayResponse
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		if len(resp.Sessions) != 2 {
+			t.Errorf("expected 2 sessions with include_phantoms=1, got %d", len(resp.Sessions))
+		}
+	})
+
+	t.Run("distribution counts only real session", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		srv.mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/distribution", nil))
+		var resp DistributionResponse
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		var got *DistributionProject
+		for i, p := range resp.Projects {
+			if p.Name == "ghost" {
+				got = &resp.Projects[i]
+				break
+			}
+		}
+		if got == nil || got.Sessions != 1 {
+			t.Errorf("ghost should show 1 session, got %+v", got)
+		}
+	})
+
+	t.Run("provider-mix counts only real session", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		srv.mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/provider-mix", nil))
+		var resp ProviderMixResponse
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		if len(resp.Providers) != 1 || resp.Providers[0].Sessions != 1 {
+			t.Errorf("expected single provider with 1 session, got %+v", resp.Providers)
+		}
+	})
+
+	t.Run("agent-skill counts only real session", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		srv.mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/agent-skill-roi", nil))
+		var resp AgentSkillResponse
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		// Both seeded sessions have empty agent → roll up under "(none)".
+		// Phantom-excluded means "(none)" should have 1 session, not 2.
+		for _, r := range resp.ByAgent {
+			if r.Name == "(none)" && r.Sessions != 1 {
+				t.Errorf("(none) agent should have 1 session, got %d", r.Sessions)
+			}
+		}
+	})
+
+	t.Run("replan-heatmap counts only real session", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		srv.mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/replan-heatmap", nil))
+		var resp ReplanHeatmapResponse
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		var total int
+		for _, c := range resp.Cells {
+			if c.Project == "ghost" {
+				total += c.SessionCount
+			}
+		}
+		if total != 1 {
+			t.Errorf("ghost project across all hours should be 1 session, got %d", total)
+		}
+	})
 }
 
 func TestFallbackPageWhenBundleAbsent(t *testing.T) {
