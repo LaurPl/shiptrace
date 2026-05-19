@@ -2,6 +2,9 @@ import { useMemo } from "react";
 import { api, TodaySession } from "../api";
 import { LoaderBoundary, useLoader } from "../components/Loader";
 
+const HOURS_IN_WINDOW = 24;
+const TICK_HOURS = 4;
+
 function fmtDuration(s: number) {
   if (s <= 0) return "—";
   if (s < 60) return `${s}s`;
@@ -9,24 +12,159 @@ function fmtDuration(s: number) {
   return `${(s / 3600).toFixed(1)}h`;
 }
 
-function sessionBar(s: TodaySession, windowStart: number, windowEnd: number) {
+function fmtTimeOfDay(unixSeconds: number) {
+  const d = new Date(unixSeconds * 1000);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+// rowTitle gives the human-readable label on the left. Falls back through
+// project basename → explicit label → start time so the row always has a
+// recognizable handle, never a raw session ID.
+function rowTitle(s: TodaySession) {
+  if (s.project) {
+    const parts = s.project.split("/").filter(Boolean);
+    if (parts.length > 0) return parts[parts.length - 1];
+  }
+  if (s.label) return s.label;
+  return `session · ${fmtTimeOfDay(s.start_ts)}`;
+}
+
+function rowMeta(s: TodaySession) {
+  const dur =
+    s.end_ts && s.end_ts > s.start_ts ? s.end_ts - s.start_ts : 0;
+  const inProgress = !s.end_ts || s.end_ts <= 0;
+  const bits: string[] = [s.provider];
+  if (s.prompt_count > 0)
+    bits.push(`${s.prompt_count} prompt${s.prompt_count === 1 ? "" : "s"}`);
+  if (s.tool_call_count > 0)
+    bits.push(`${s.tool_call_count} tool${s.tool_call_count === 1 ? "" : "s"}`);
+  if (dur > 0) bits.push(fmtDuration(dur));
+  if (s.replan_score > 0) bits.push(`replan ${s.replan_score.toFixed(2)}`);
+  if (
+    !inProgress &&
+    dur === 0 &&
+    s.prompt_count === 0 &&
+    s.tool_call_count === 0
+  ) {
+    bits.push("empty");
+  }
+  return bits.join(" · ");
+}
+
+function barTooltip(s: TodaySession) {
+  const dur =
+    s.end_ts && s.end_ts > s.start_ts ? s.end_ts - s.start_ts : 0;
+  const inProgress = !s.end_ts || s.end_ts <= 0;
+  const parts = [
+    s.id,
+    `started ${fmtTimeOfDay(s.start_ts)}`,
+    inProgress ? "in progress" : dur > 0 ? fmtDuration(dur) : "instant",
+    `${s.ship_count} ship${s.ship_count === 1 ? "" : "s"}`,
+  ];
+  return parts.join(" · ");
+}
+
+function sessionBar(
+  s: TodaySession,
+  windowStart: number,
+  windowEnd: number,
+) {
   const span = windowEnd - windowStart || 1;
-  const left = Math.max(0, ((s.start_ts - windowStart) / span) * 100);
-  const end = s.end_ts && s.end_ts > 0 ? s.end_ts : windowEnd;
-  const width = Math.max(0.5, ((end - s.start_ts) / span) * 100);
-  let cls = "bar";
-  if (!s.end_ts || s.end_ts <= 0) cls += " in-progress";
-  else if (s.ship_count > 0) cls += " shipped";
-  else cls += " unshipped";
-  const duration = end - s.start_ts;
+  const left = Math.max(
+    0,
+    Math.min(100, ((s.start_ts - windowStart) / span) * 100),
+  );
+  const inProgress = !s.end_ts || s.end_ts <= 0;
+  const end = inProgress ? windowEnd : s.end_ts!;
+  const dur = end - s.start_ts;
+
+  // A bounded session with start == end has no horizontal extent. Render
+  // it as a pip (dot) so the viewer can see something fired without it
+  // disappearing into a half-pixel sliver.
+  const isPip = !inProgress && dur <= 0;
+
+  let stateCls = "";
+  if (inProgress) stateCls = "in-progress";
+  else if (s.ship_count > 0) stateCls = "shipped";
+  else stateCls = "unshipped";
+
+  if (isPip) {
+    return (
+      <div className="bar-track">
+        <div
+          className={`bar-pip ${stateCls}`}
+          style={{ left: `${left}%` }}
+          title={barTooltip(s)}
+        />
+      </div>
+    );
+  }
+
+  const width = Math.max(0.5, (dur / span) * 100);
   return (
-    <div className="bar-track" key={s.id}>
+    <div className="bar-track">
       <div
-        className={cls}
+        className={`bar ${stateCls}`}
         style={{ left: `${left}%`, width: `${width}%` }}
-        title={`${s.label || s.id} — ${fmtDuration(duration)}, ${s.ship_count} ship${s.ship_count === 1 ? "" : "s"}`}
+        title={barTooltip(s)}
       >
         {s.ship_count > 0 ? `${s.ship_count}✓` : ""}
+      </div>
+    </div>
+  );
+}
+
+function buildTicks(windowStart: number, windowEnd: number) {
+  // Anchor ticks to local-time TICK_HOURS boundaries (00, 04, 08, …) so
+  // labels read at a glance instead of drifting with windowStart's
+  // sub-hour offset.
+  const start = new Date(windowStart * 1000);
+  start.setMinutes(0, 0, 0);
+  const h = start.getHours();
+  const skip = (TICK_HOURS - (h % TICK_HOURS)) % TICK_HOURS;
+  start.setHours(h + skip);
+  if (Math.floor(start.getTime() / 1000) < windowStart) {
+    start.setHours(start.getHours() + TICK_HOURS);
+  }
+  const out: { atUnix: number; label: string }[] = [];
+  for (
+    let t = Math.floor(start.getTime() / 1000);
+    t < windowEnd;
+    t += TICK_HOURS * 3600
+  ) {
+    out.push({ atUnix: t, label: fmtTimeOfDay(t) });
+  }
+  return out;
+}
+
+function TimeAxis({
+  windowStart,
+  windowEnd,
+}: {
+  windowStart: number;
+  windowEnd: number;
+}) {
+  const span = windowEnd - windowStart || 1;
+  const ticks = buildTicks(windowStart, windowEnd);
+  return (
+    <div className="time-axis-row">
+      <div className="time-axis-spacer" />
+      <div className="time-axis">
+        {ticks.map((tk) => {
+          const leftPct = ((tk.atUnix - windowStart) / span) * 100;
+          return (
+            <div
+              key={tk.atUnix}
+              className="time-tick"
+              style={{ left: `${leftPct}%` }}
+            >
+              {tk.label}
+            </div>
+          );
+        })}
+        <div className="now-marker" title="now" />
       </div>
     </div>
   );
@@ -49,7 +187,7 @@ export default function Today() {
   );
 
   const windowEnd = Math.floor(Date.now() / 1000);
-  const windowStart = windowEnd - 24 * 3600;
+  const windowStart = windowEnd - HOURS_IN_WINDOW * 3600;
   const shipped = sessions.filter((s) => s.ship_count > 0).length;
   const inProgress = sessions.filter(
     (s) => !s.end_ts || s.end_ts <= 0,
@@ -73,17 +211,15 @@ export default function Today() {
           {sessions.map((s) => (
             <div className="timeline" key={s.id}>
               <div className="label">
-                <div className="title">{s.label || s.id}</div>
-                <div className="meta">
-                  {s.project || "(no project)"} · {s.provider}
-                  {s.replan_score > 0
-                    ? ` · replan ${s.replan_score.toFixed(2)}`
-                    : ""}
+                <div className="title">{rowTitle(s)}</div>
+                <div className="meta" title={s.id}>
+                  {rowMeta(s)}
                 </div>
               </div>
               {sessionBar(s, windowStart, windowEnd)}
             </div>
           ))}
+          <TimeAxis windowStart={windowStart} windowEnd={windowEnd} />
         </div>
       )}
     </LoaderBoundary>
