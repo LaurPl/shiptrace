@@ -264,23 +264,30 @@ func (h *Handler) HandleSubagentStop(p *HookPayload) error {
 }
 
 // HandleStop emits the session_stop event and cleans up the cc-session-id
-// mapping file. If the mapping is missing, we still emit an event with the
-// CC session id stuffed into provider_session_id so the ingester can
-// reconcile.
+// mapping file.
+//
+// If the mapping is missing, we treat the Stop as orphaned and decline to
+// emit any event. Orphaned stops happen at install boundaries: CC sessions
+// already open when `shiptrace init` runs never fire SessionStart with the
+// new hooks (CC reads settings.json at session-open time), so by the time
+// Stop fires there's no shp_ id to attach to. Synthesizing one would write
+// a phantom session_stop with no preceding start, prompt, or tool_use —
+// the ingester then materializes a "session" row at stop_ts with all-zero
+// counts, which is pure noise on the dashboard. The path-of-least-surprise
+// is to drop the event quietly and still clean up the per-cwd pointer.
 func (h *Handler) HandleStop(p *HookPayload) error {
-	now := h.Now()
 	shpID, err := h.Sessions.Get(p.SessionID)
 	if err != nil {
 		return err
 	}
 	if shpID == "" {
-		// SessionStart never fired (or was lost). Synthesize an id so the
-		// event isn't dropped; the ingester will backfill the sessions row.
-		shpID = h.IDGen()
+		// Orphaned Stop — clean up best-effort and return.
+		h.clearProjectPointer(p.Cwd)
+		return h.Sessions.Delete(p.SessionID)
 	}
 	if err := h.Writer.Append(events.Event{
 		EventType: events.SessionStop,
-		Ts:        now,
+		Ts:        h.Now(),
 		SessionID: shpID,
 		Provider:  Provider,
 		Metadata: map[string]any{
