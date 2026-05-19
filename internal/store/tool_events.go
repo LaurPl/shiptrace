@@ -91,6 +91,50 @@ func (s *Store) InsertReplanSignal(ctx context.Context, e events.Event) error {
 	return nil
 }
 
+// ToolEventRow is the read shape returned by ListToolEvents. We expose
+// FilesTouched as a decoded []string (already canonicalized at write
+// time) so callers don't repeat the JSON unmarshal dance.
+type ToolEventRow struct {
+	SessionID     string
+	Ts            int64
+	Tool          string
+	ToolInputHash string
+	FilesTouched  []string
+}
+
+// ListToolEvents returns every tool_event for the session in ts order.
+// Empty slice (not nil) when the session has no tool calls so callers
+// don't need a nil-check before len().
+func (s *Store) ListToolEvents(ctx context.Context, sessionID string) ([]ToolEventRow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT session_id, ts, tool, COALESCE(tool_input_hash, ''), COALESCE(files_touched, '')
+		FROM tool_events
+		WHERE session_id = ?
+		ORDER BY ts ASC
+	`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("store: query tool_events: %w", err)
+	}
+	defer rows.Close()
+	out := make([]ToolEventRow, 0)
+	for rows.Next() {
+		var r ToolEventRow
+		var filesJSON string
+		if err := rows.Scan(&r.SessionID, &r.Ts, &r.Tool, &r.ToolInputHash, &filesJSON); err != nil {
+			return nil, fmt.Errorf("store: scan tool_event: %w", err)
+		}
+		if filesJSON != "" {
+			if err := json.Unmarshal([]byte(filesJSON), &r.FilesTouched); err != nil {
+				// Stored shape is internal; if it ever fails to round-trip we
+				// surface the broken row rather than silently drop it.
+				return nil, fmt.Errorf("store: decode files_touched: %w", err)
+			}
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // BumpSessionPromptCount increments prompt_count on the sessions row. The
 // ingester calls this on every prompt event so the dashboard can show
 // per-session prompt counts cheaply.

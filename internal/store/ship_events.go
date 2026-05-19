@@ -52,6 +52,49 @@ func (s *Store) InsertShipEvent(ctx context.Context, e events.Event) error {
 	return nil
 }
 
+// ShipEventRow is the read shape returned by ListShipEvents. metadata
+// stays as raw JSON bytes; the server-side handler can pass it through
+// as a json.RawMessage so the client gets the same shape that landed in
+// the JSONL line.
+type ShipEventRow struct {
+	SessionID         string
+	Ts                int64
+	Kind              string
+	Ref               string
+	Metadata          []byte
+	AttributionMethod string
+}
+
+// ListShipEvents returns every ship_event attributed to the session, in
+// ts order. Includes rows where session_id IS NULL only if the caller
+// passed sessionID == "" — drill-down callers should always pass an id.
+func (s *Store) ListShipEvents(ctx context.Context, sessionID string) ([]ShipEventRow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT COALESCE(session_id, ''), ts, kind, COALESCE(ref, ''),
+		       COALESCE(metadata, ''), COALESCE(attribution_method, '')
+		FROM ship_events
+		WHERE session_id = ?
+		ORDER BY ts ASC
+	`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("store: query ship_events: %w", err)
+	}
+	defer rows.Close()
+	out := make([]ShipEventRow, 0)
+	for rows.Next() {
+		var r ShipEventRow
+		var meta string
+		if err := rows.Scan(&r.SessionID, &r.Ts, &r.Kind, &r.Ref, &meta, &r.AttributionMethod); err != nil {
+			return nil, fmt.Errorf("store: scan ship_event: %w", err)
+		}
+		if meta != "" {
+			r.Metadata = []byte(meta)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 func cloneMetadata(m map[string]any) map[string]any {
 	out := make(map[string]any, len(m))
 	for k, v := range m {
