@@ -227,6 +227,12 @@ export default function Today() {
     setParams(next, { replace: true });
   };
 
+  const openSession = (id: string) => {
+    const next = new URLSearchParams(params);
+    next.set("session_id", id);
+    setParams(next);
+  };
+
   const windowEnd = Math.floor(Date.now() / 1000);
   const windowStart = windowEnd - HOURS_IN_WINDOW * 3600;
   const shipped = sessions.filter((s) => s.ship_count > 0).length;
@@ -270,7 +276,20 @@ export default function Today() {
           </div>
           <LegendStrip items={LEGEND_ITEMS} />
           {sessions.map((s) => (
-            <div className="timeline" key={s.id}>
+            <div
+              className="timeline timeline-clickable"
+              key={s.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => openSession(s.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  openSession(s.id);
+                }
+              }}
+              title="Open session detail"
+            >
               <div className="label">
                 <div className="title">{rowTitle(s)}</div>
                 <div className="meta" title={s.id}>
