@@ -324,14 +324,21 @@ func TestHandleStopCleansUpSessionMap(t *testing.T) {
 	}
 }
 
-func TestHandleStopWithoutStartStillEmits(t *testing.T) {
+// TestHandleStopWithoutStartIsOrphan locks in the policy that a Stop hook
+// without a matching SessionStart (and therefore no cc-sessions/<uuid>
+// mapping) drops the event quietly. This happens at install boundaries
+// where CC sessions opened before `shiptrace init` ran fire Stop on
+// shutdown but never fired Start under the new hooks. Synthesizing a
+// session_stop in that case produces a phantom "session" with no preceding
+// start/prompt/tool_use and pollutes the dashboard.
+func TestHandleStopWithoutStartIsOrphan(t *testing.T) {
 	h := newHarness(t)
 	if err := h.handler.HandleStop(&HookPayload{SessionID: "cc-orphan"}); err != nil {
 		t.Fatalf("HandleStop: %v", err)
 	}
 	ev := h.readEvents()
-	if len(ev) != 1 || ev[0].EventType != events.SessionStop {
-		t.Fatalf("expected synthetic session_stop, got %+v", ev)
+	if len(ev) != 0 {
+		t.Fatalf("orphan Stop must not emit events, got %+v", ev)
 	}
 }
 
