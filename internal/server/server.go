@@ -109,6 +109,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/replan-heatmap", s.handleReplanHeatmap)
 	s.mux.HandleFunc("/api/agent-skill-roi", s.handleAgentSkillROI)
 	s.mux.HandleFunc("/api/provider-mix", s.handleProviderMix)
+	s.mux.HandleFunc("/api/health", s.handleHealth)
 	// Go 1.22+ ServeMux supports {id} path parameters; read with
 	// r.PathValue("id"). GET-only — drill-down is read-only.
 	s.mux.HandleFunc("GET /api/session/{id}", s.handleSession)

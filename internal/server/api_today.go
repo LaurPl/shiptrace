@@ -42,7 +42,7 @@ func (s *Server) handleToday(w http.ResponseWriter, r *http.Request) {
 			s.prompt_count, s.tool_call_count, s.replan_score,
 			(SELECT COUNT(*) FROM ship_events WHERE session_id = s.id) AS ship_count
 		FROM sessions s
-		WHERE s.start_ts >= ? OR (s.end_ts IS NULL AND s.start_ts >= ?)
+		WHERE (s.start_ts >= ? OR (s.end_ts IS NULL AND s.start_ts >= ?))`+phantomFilter(r)+`
 		ORDER BY s.start_ts DESC
 	`, cutoff, cutoff)
 	if err != nil {

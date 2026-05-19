@@ -115,6 +115,22 @@ nav.tabs a:hover {
   font-style: italic;
 }
 
+.global-banner {
+  background: var(--bg-elevated-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem 0.9rem;
+  margin: 0.5rem 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--fg-dim);
+}
+.global-banner code {
+  color: var(--accent);
+  background: var(--bg);
+  padding: 0.05em 0.35em;
+  border-radius: 3px;
+}
+
 .loading {
   color: var(--fg-dim);
   padding: 1.5rem;

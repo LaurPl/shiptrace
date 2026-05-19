@@ -82,6 +82,10 @@ export interface VersionResponse {
   schema_state: string;
 }
 
+export interface HealthResponse {
+  has_ships: boolean;
+}
+
 async function getJSON<T>(path: string): Promise<T> {
   const r = await fetch(path);
   if (!r.ok) {
@@ -100,5 +104,6 @@ export const api = {
     getJSON<AgentSkillResponse>(`/api/agent-skill-roi?days=${days}`),
   providerMix: (days = 30) =>
     getJSON<ProviderMixResponse>(`/api/provider-mix?days=${days}`),
+  health: () => getJSON<HealthResponse>("/api/health"),
   version: () => getJSON<VersionResponse>("/api/version"),
 };

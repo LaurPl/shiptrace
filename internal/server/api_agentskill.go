@@ -25,12 +25,13 @@ func (s *Server) handleAgentSkillROI(w http.ResponseWriter, r *http.Request) {
 	days := parseDays(r)
 	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour).Unix()
 
-	byAgent, err := s.aggregateAgentSkill(r, cutoff, "agent")
+	filter := phantomFilter(r)
+	byAgent, err := s.aggregateAgentSkill(r, cutoff, "agent", filter)
 	if err != nil {
 		writeInternalError(w, r, "agent-skill-roi", err)
 		return
 	}
-	bySkill, err := s.aggregateAgentSkill(r, cutoff, "skill")
+	bySkill, err := s.aggregateAgentSkill(r, cutoff, "skill", filter)
 	if err != nil {
 		writeInternalError(w, r, "agent-skill-roi", err)
 		return
@@ -45,20 +46,21 @@ func (s *Server) handleAgentSkillROI(w http.ResponseWriter, r *http.Request) {
 // aggregateAgentSkill runs the per-dimension grouping. Two callers, one
 // helper — we accept a small SQL-string-formatting risk for the column
 // name (`agent` or `skill`); a switch keeps the input set closed.
-func (s *Server) aggregateAgentSkill(r *http.Request, cutoff int64, column string) ([]AgentSkillRow, error) {
+func (s *Server) aggregateAgentSkill(r *http.Request, cutoff int64, column, filter string) ([]AgentSkillRow, error) {
 	switch column {
 	case "agent", "skill":
 	default:
 		return nil, nil
 	}
-	// nolint:gosec — column is from a closed set above
+	// nolint:gosec — column is from a closed set above; filter is from
+	// store.PhantomFilterSQL (constant) or empty.
 	query := `
 		SELECT
 			COALESCE(NULLIF(s.` + column + `, ''), '(none)') AS name,
 			COUNT(DISTINCT s.id) AS sessions,
 			COALESCE(SUM((SELECT COUNT(*) FROM ship_events WHERE session_id = s.id)), 0) AS ships
 		FROM sessions s
-		WHERE s.start_ts >= ?
+		WHERE s.start_ts >= ?` + filter + `
 		GROUP BY name
 		ORDER BY sessions DESC
 	`
