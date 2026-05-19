@@ -218,6 +218,73 @@ table.data .id {
   background: var(--info);
 }
 
+/* Pip: a session with no measurable duration (start == end). Anchored at
+   start_ts so the viewer sees "something fired here" without it shrinking
+   into an invisible sliver. */
+.timeline .bar-pip {
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  margin-left: -4px;
+  border-radius: 50%;
+  background: var(--accent-dim);
+  border: 1px solid var(--bg);
+}
+.timeline .bar-pip.shipped {
+  background: var(--accent);
+}
+.timeline .bar-pip.unshipped {
+  background: var(--error);
+  opacity: 0.85;
+}
+.timeline .bar-pip.in-progress {
+  background: var(--info);
+}
+
+/* Time axis below the bars. Mirrors the .timeline grid so ticks line up
+   with bar positions. */
+.time-axis-row {
+  display: grid;
+  grid-template-columns: 1fr 8fr;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--bg-elevated-2);
+  font-size: 0.7rem;
+  color: var(--fg-dim);
+}
+.time-axis-spacer {
+  /* empty cell aligning the axis to the bar-track column */
+}
+.time-axis {
+  position: relative;
+  height: 1.1rem;
+}
+.time-tick {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  user-select: none;
+}
+.time-tick::before {
+  content: "|";
+  display: block;
+  text-align: center;
+  color: var(--border);
+  line-height: 0.4rem;
+}
+.now-marker {
+  position: absolute;
+  right: 0;
+  top: -0.3rem;
+  bottom: 0;
+  width: 1px;
+  background: var(--accent);
+  opacity: 0.5;
+}
+
 /* Heatmap: 7 projects × 24 hours, CSS grid */
 .heatmap {
   display: grid;
