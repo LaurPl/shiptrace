@@ -1,17 +1,6 @@
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { AgentSkillRow, api } from "../api";
 import { LoaderBoundary, useLoader } from "../components/Loader";
-
-const ACCENT = "#6ab04c";
-const ACCENT_DIM = "#4a7d35";
+import { BarComparisonChart, ChartPalette } from "../components/Chart";
 
 // isUnattributed returns true when the only row in the slice is the
 // `(none)` bucket — meaning no session has yet been tagged with an
@@ -42,35 +31,20 @@ function Section({
   return (
     <div className="card">
       <h2>{title}</h2>
-      <ResponsiveContainer width="100%" height={Math.max(220, rows.length * 36)}>
-        <BarChart
-          data={rows}
-          layout="vertical"
-          margin={{ top: 8, right: 32, left: 8, bottom: 8 }}
-        >
-          <CartesianGrid stroke="#2a2a2a" strokeDasharray="3 3" />
-          <XAxis type="number" stroke="#888" fontSize={11} tickLine={false} />
-          <YAxis
-            type="category"
-            dataKey="name"
-            stroke="#888"
-            width={150}
-            tickLine={false}
-            fontSize={11}
-          />
-          <Tooltip
-            cursor={{ fill: "#1c1c1c" }}
-            contentStyle={{
-              background: "#141414",
-              border: "1px solid #2a2a2a",
-              fontFamily: "monospace",
-              fontSize: 12,
-            }}
-          />
-          <Bar dataKey="sessions" fill={ACCENT_DIM} name="sessions" />
-          <Bar dataKey="ships" fill={ACCENT} name="ships" />
-        </BarChart>
-      </ResponsiveContainer>
+      <BarComparisonChart
+        data={rows}
+        categoryKey="name"
+        categoryWidth={150}
+        height={Math.max(220, rows.length * 36)}
+        series={[
+          {
+            key: "sessions",
+            label: "sessions",
+            color: ChartPalette.accentDim,
+          },
+          { key: "ships", label: "ships", color: ChartPalette.accent },
+        ]}
+      />
     </div>
   );
 }

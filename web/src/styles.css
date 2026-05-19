@@ -164,6 +164,66 @@ button.inline-toggle:hover {
   font-variant-numeric: tabular-nums;
 }
 
+/* Help hint: small inline "?" badge in a card title that exposes a
+   definition on hover. Title-attr drives both pointer and a11y. */
+.help-hint {
+  display: inline-block;
+  min-width: 1.1em;
+  height: 1.1em;
+  padding: 0 0.25em;
+  margin-left: 0.4em;
+  border-radius: 50%;
+  background: var(--bg-elevated-2);
+  color: var(--fg-dim);
+  font-size: 0.7rem;
+  text-align: center;
+  line-height: 1.1em;
+  cursor: help;
+  vertical-align: middle;
+}
+.help-hint:hover {
+  background: var(--border);
+  color: var(--fg);
+}
+
+/* Provider mix N=1 summary: a chart of one bar conveys nothing, so we
+   replace it with a one-line stat strip. Keeps the page rhythm. */
+.provider-summary {
+  padding: 0.75rem 0.25rem 0.25rem;
+}
+.provider-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  align-items: baseline;
+}
+.provider-summary-label {
+  color: var(--fg);
+  font-weight: 600;
+}
+.provider-summary-stat {
+  color: var(--fg-dim);
+  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+}
+.provider-summary-num {
+  color: var(--fg);
+  font-size: 1.1rem;
+  font-variant-numeric: tabular-nums;
+}
+.provider-summary-unit {
+  color: var(--fg-dim);
+  font-size: 0.75rem;
+}
+.provider-summary-note {
+  margin-top: 0.6rem;
+  font-size: 0.72rem;
+  color: var(--fg-dim);
+  font-style: italic;
+}
+
 /* Variance banner inside the replan card: same colour vocab as .empty
    but inline-positioned so it sits above the (still-rendered) grid. */
 .variance-banner {
