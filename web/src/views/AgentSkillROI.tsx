@@ -13,6 +13,14 @@ import { LoaderBoundary, useLoader } from "../components/Loader";
 const ACCENT = "#6ab04c";
 const ACCENT_DIM = "#4a7d35";
 
+// isUnattributed returns true when the only row in the slice is the
+// `(none)` bucket — meaning no session has yet been tagged with an
+// agent or skill. Rendering a one-row chart in that case is misleading;
+// we show an empty state with a pointer to the docs instead.
+function isUnattributed(rows: AgentSkillRow[]): boolean {
+  return rows.length === 0 || (rows.length === 1 && rows[0].name === "(none)");
+}
+
 function Section({
   title,
   rows,
@@ -20,11 +28,14 @@ function Section({
   title: string;
   rows: AgentSkillRow[];
 }) {
-  if (rows.length === 0) {
+  if (isUnattributed(rows)) {
     return (
       <div className="card">
         <h2>{title}</h2>
-        <div className="empty">no data yet</div>
+        <div className="empty">
+          no agent/skill attribution recorded yet — sessions appear here once
+          the recorder captures an agent or skill tag.
+        </div>
       </div>
     );
   }

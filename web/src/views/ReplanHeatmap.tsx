@@ -1,5 +1,6 @@
 import { api, ReplanCell } from "../api";
 import { LoaderBoundary, useLoader } from "../components/Loader";
+import { GradientLegend } from "../components/LegendStrip";
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
@@ -31,12 +32,23 @@ function cellFor(
   return cells.find((c) => c.project === project && c.hour === hour);
 }
 
+// noVariance returns true when every populated cell carries the same
+// score — the colour gradient then conveys nothing. We surface a banner
+// instead of letting the user squint at a uniformly tinted grid.
+function noVariance(cells: ReplanCell[]): boolean {
+  const populated = cells.filter((c) => c.session_count > 0);
+  if (populated.length === 0) return true;
+  const first = populated[0].mean_score;
+  return populated.every((c) => c.mean_score === first);
+}
+
 export default function ReplanHeatmap() {
   const state = useLoader(() => api.replanHeatmap(30), []);
   return (
     <LoaderBoundary state={state} empty={(d) => d.cells.length === 0}>
       {(data) => {
         const projects = data.projects.length > 0 ? data.projects : ["(unassigned)"];
+        const flat = noVariance(data.cells);
         return (
           <div className="card">
             <h2>replan heatmap — project × hour</h2>
@@ -44,6 +56,13 @@ export default function ReplanHeatmap() {
               last {data.window_days} day{data.window_days === 1 ? "" : "s"} ·
               warm = high replan score · opacity = session volume
             </div>
+            {flat && (
+              <div className="variance-banner" role="status">
+                Not enough variance to render a gradient — every populated cell
+                has the same replan score. The grid below still shows when
+                sessions ran; the colour is informational only.
+              </div>
+            )}
             <div className="heatmap">
               <div />
               {HOURS.map((h) => (
@@ -55,6 +74,13 @@ export default function ReplanHeatmap() {
                 <FragmentRow key={proj} project={proj} cells={data.cells} />
               ))}
             </div>
+            <GradientLegend
+              from="rgba(20, 130, 160, 0.85)"
+              to="rgba(255, 50, 50, 0.85)"
+              min="0.0"
+              mid="0.5"
+              max="1.0"
+            />
           </div>
         );
       }}
