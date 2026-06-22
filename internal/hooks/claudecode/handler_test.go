@@ -185,11 +185,39 @@ func TestHandlePromptOptInVerbatim(t *testing.T) {
 	}
 }
 
-func TestHandlePromptWithoutSessionMappingErrors(t *testing.T) {
+// TestHandlePromptSelfHealsWithoutMapping locks in the recovery behavior: a
+// prompt for a session we never saw a SessionStart for must NOT error and must
+// NOT be dropped. resolveSession adopts the session — minting an id, persisting
+// the mapping, and backfilling a synthetic session_start — so the prompt still
+// lands. This is the regression guard for the "no shp_ id mapping" failure.
+func TestHandlePromptSelfHealsWithoutMapping(t *testing.T) {
 	h := newHarness(t)
-	err := h.handler.HandlePrompt(&HookPayload{SessionID: "cc-orphan", Prompt: "hi"})
-	if err == nil {
-		t.Fatalf("expected error for missing mapping")
+	if err := h.handler.HandlePrompt(&HookPayload{SessionID: "cc-orphan", Cwd: "/x", Prompt: "hi"}); err != nil {
+		t.Fatalf("HandlePrompt should self-heal, got error: %v", err)
+	}
+
+	// The session is now mapped...
+	mapped, _ := h.sessions.Get("cc-orphan")
+	if mapped == "" {
+		t.Fatalf("session map not populated by self-heal")
+	}
+
+	// ...and the log carries a synthetic session_start followed by the prompt.
+	ev := h.readEvents()
+	if len(ev) != 2 {
+		t.Fatalf("expected 2 events (synthetic session_start, prompt), got %d: %+v", len(ev), ev)
+	}
+	if ev[0].EventType != events.SessionStart {
+		t.Errorf("event[0] type: %q want session_start", ev[0].EventType)
+	}
+	if ev[0].Metadata["synthetic_start"] != true {
+		t.Errorf("backfilled start not marked synthetic: %+v", ev[0].Metadata)
+	}
+	if ev[1].EventType != events.Prompt {
+		t.Errorf("event[1] type: %q want prompt", ev[1].EventType)
+	}
+	if ev[0].SessionID != mapped || ev[1].SessionID != mapped {
+		t.Errorf("events not stamped with mapped id: start=%s prompt=%s map=%s", ev[0].SessionID, ev[1].SessionID, mapped)
 	}
 }
 
@@ -307,12 +335,12 @@ func TestHandleToolUseTodoWriteEmitsReplanSignal(t *testing.T) {
 	}
 }
 
-func TestHandleStopCleansUpSessionMap(t *testing.T) {
+func TestHandleSessionEndCleansUpSessionMap(t *testing.T) {
 	h := newHarness(t)
 	_ = h.handler.HandleSessionStart(&HookPayload{SessionID: "cc-uuid-6", Cwd: "/x"})
 
-	if err := h.handler.HandleStop(&HookPayload{SessionID: "cc-uuid-6"}); err != nil {
-		t.Fatalf("HandleStop: %v", err)
+	if err := h.handler.HandleSessionEnd(&HookPayload{SessionID: "cc-uuid-6"}); err != nil {
+		t.Fatalf("HandleSessionEnd: %v", err)
 	}
 	mapped, _ := h.sessions.Get("cc-uuid-6")
 	if mapped != "" {
@@ -324,21 +352,56 @@ func TestHandleStopCleansUpSessionMap(t *testing.T) {
 	}
 }
 
-// TestHandleStopWithoutStartIsOrphan locks in the policy that a Stop hook
-// without a matching SessionStart (and therefore no cc-sessions/<uuid>
-// mapping) drops the event quietly. This happens at install boundaries
-// where CC sessions opened before `shiptrace init` ran fire Stop on
-// shutdown but never fired Start under the new hooks. Synthesizing a
-// session_stop in that case produces a phantom "session" with no preceding
-// start/prompt/tool_use and pollutes the dashboard.
-func TestHandleStopWithoutStartIsOrphan(t *testing.T) {
+// TestHandleStopKeepsMappingAcrossTurns is the core regression guard for the
+// turn-vs-session bug. Stop fires at the end of EVERY assistant turn; it must
+// not emit a session_stop or delete the mapping, or the next prompt/tool_use
+// in the same live session would be orphaned. We fire several Stops and assert
+// the mapping survives, no session_stop is written, and a subsequent prompt
+// still resolves to the original id without self-healing into a new one.
+func TestHandleStopKeepsMappingAcrossTurns(t *testing.T) {
 	h := newHarness(t)
-	if err := h.handler.HandleStop(&HookPayload{SessionID: "cc-orphan"}); err != nil {
-		t.Fatalf("HandleStop: %v", err)
+	_ = h.handler.HandleSessionStart(&HookPayload{SessionID: "cc-live", Cwd: "/x"})
+	original, _ := h.sessions.Get("cc-live")
+
+	for i := 0; i < 3; i++ {
+		if err := h.handler.HandleStop(&HookPayload{SessionID: "cc-live", Cwd: "/x"}); err != nil {
+			t.Fatalf("HandleStop turn %d: %v", i, err)
+		}
+		if mapped, _ := h.sessions.Get("cc-live"); mapped != original {
+			t.Fatalf("Stop turn %d changed/cleared mapping: %q (want %q)", i, mapped, original)
+		}
+	}
+
+	if err := h.handler.HandlePrompt(&HookPayload{SessionID: "cc-live", Cwd: "/x", Prompt: "still here"}); err != nil {
+		t.Fatalf("HandlePrompt after stops: %v", err)
+	}
+
+	ev := h.readEvents()
+	for _, e := range ev {
+		if e.EventType == events.SessionStop {
+			t.Errorf("Stop must not emit session_stop, found one: %+v", e)
+		}
+		if e.EventType == events.SessionStart && e.Metadata["synthetic_start"] == true {
+			t.Errorf("prompt should resolve the live mapping, not self-heal a new session")
+		}
+	}
+}
+
+// TestHandleSessionEndWithoutStartIsOrphan locks in the policy that a
+// SessionEnd without a matching SessionStart (and therefore no
+// cc-sessions/<uuid> mapping) drops the event quietly. This happens at install
+// boundaries where CC sessions opened before `shiptrace init` ran fire
+// SessionEnd on shutdown but never fired Start under the new hooks.
+// Synthesizing a session_stop in that case produces a phantom "session" with
+// no preceding start/prompt/tool_use and pollutes the dashboard.
+func TestHandleSessionEndWithoutStartIsOrphan(t *testing.T) {
+	h := newHarness(t)
+	if err := h.handler.HandleSessionEnd(&HookPayload{SessionID: "cc-orphan"}); err != nil {
+		t.Fatalf("HandleSessionEnd: %v", err)
 	}
 	ev := h.readEvents()
 	if len(ev) != 0 {
-		t.Fatalf("orphan Stop must not emit events, got %+v", ev)
+		t.Fatalf("orphan SessionEnd must not emit events, got %+v", ev)
 	}
 }
 
@@ -357,12 +420,12 @@ func TestHandleSessionStartWritesProjectPointer(t *testing.T) {
 		t.Fatalf("pointer not written: %v", err)
 	}
 
-	// Stop cleans up.
-	if err := h.handler.HandleStop(&HookPayload{SessionID: "cc-pp", Cwd: cwd}); err != nil {
-		t.Fatalf("HandleStop: %v", err)
+	// SessionEnd cleans up.
+	if err := h.handler.HandleSessionEnd(&HookPayload{SessionID: "cc-pp", Cwd: cwd}); err != nil {
+		t.Fatalf("HandleSessionEnd: %v", err)
 	}
 	if _, statErr := readActivePointer(pointerPath); statErr == nil {
-		t.Fatalf("pointer should be cleared after HandleStop")
+		t.Fatalf("pointer should be cleared after HandleSessionEnd")
 	}
 }
 

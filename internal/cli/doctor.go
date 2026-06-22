@@ -120,7 +120,7 @@ func checkSettings() checkResult {
 	for _, p := range present {
 		names = append(names, string(p))
 	}
-	return checkResult{"settings.json hooks", "✓", fmt.Sprintf("all 5 installed (%s)", strings.Join(names, ", "))}
+	return checkResult{"settings.json hooks", "✓", fmt.Sprintf("all %d installed (%s)", len(present), strings.Join(names, ", "))}
 }
 
 // checkLatency invokes shiptrace-cc-hook several times against a temp

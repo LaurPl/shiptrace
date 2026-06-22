@@ -24,8 +24,8 @@ func TestRunInitInstallsHooksAndIsIdempotent(t *testing.T) {
 	if _, err := os.Stat(settingsPath); err != nil {
 		t.Fatalf("settings.json not written: %v", err)
 	}
-	if !strings.Contains(out.String(), "Adding 5 hook entries") {
-		t.Errorf("expected 'Adding 5 hook entries', got: %s", out.String())
+	if !strings.Contains(out.String(), "Adding 6 hook entries") {
+		t.Errorf("expected 'Adding 6 hook entries', got: %s", out.String())
 	}
 
 	// Second run should short-circuit.
