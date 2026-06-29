@@ -14,7 +14,7 @@
 //
 // Subcommands match the CC hook event names, lowercased and dash-joined:
 //
-//	session-start | prompt | tool-use | subagent-stop | stop
+//	session-start | prompt | tool-use | subagent-stop | stop | session-end
 //
 // Hook payload JSON is read from stdin. Exit code is 0 on success, 1 on
 // error. Errors are written to stderr but never printed to stdout — CC
@@ -33,7 +33,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "shiptrace-cc-hook: subcommand required (session-start | prompt | tool-use | subagent-stop | stop)")
+		fmt.Fprintln(os.Stderr, "shiptrace-cc-hook: subcommand required (session-start | prompt | tool-use | subagent-stop | stop | session-end)")
 		os.Exit(2)
 	}
 	if err := run(os.Args[1]); err != nil {
@@ -78,6 +78,8 @@ func run(subcommand string) error {
 		return h.HandleSubagentStop(payload)
 	case "stop":
 		return h.HandleStop(payload)
+	case "session-end":
+		return h.HandleSessionEnd(payload)
 	default:
 		return fmt.Errorf("unknown subcommand %q", subcommand)
 	}

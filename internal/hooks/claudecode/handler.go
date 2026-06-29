@@ -3,6 +3,7 @@ package claudecode
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -30,6 +31,11 @@ type Handler struct {
 	IDGen    func() string          // override for tests
 	Now      func() time.Time       // override for tests
 	Hostname func() (string, error) // override for tests
+	// Warn receives non-fatal recorder warnings (e.g. a self-heal adoption).
+	// It defaults to stderr; tests override it. Kept separate from returned
+	// errors because the event WAS recorded — we want to nag the user that
+	// SessionStart isn't firing, not fail the hook and drop the event.
+	Warn func(string)
 }
 
 // New constructs a Handler with sensible production defaults.
@@ -41,21 +47,52 @@ func New(w *eventlog.Writer, m *SessionMap, home string) *Handler {
 		IDGen:    events.NewSessionID,
 		Now:      func() time.Time { return time.Now().UTC() },
 		Hostname: func() (string, error) { return "", nil },
+		Warn:     func(m string) { fmt.Fprintln(os.Stderr, "shiptrace-cc-hook:", m) },
 	}
 }
 
 // HandleSessionStart materializes a session_start event for a CC session.
-// It generates a shp_ id, persists the mapping ccID → shpID, and emits
-// the event with privacy-safe metadata.
+// It mints a shp_ id, emits the event, and persists the mapping ccID → shpID.
 func (h *Handler) HandleSessionStart(p *HookPayload) error {
 	if p.SessionID == "" {
 		return errors.New("claudecode: SessionStart payload missing session_id")
 	}
-	shpID := h.IDGen()
-	if err := h.Sessions.Set(p.SessionID, shpID); err != nil {
-		return err
-	}
+	_, err := h.adoptSession(p, false)
+	return err
+}
 
+// adoptSession mints a shp_ id for p.SessionID, emits the session_start event,
+// and only THEN persists the cc-uuid → shp_ mapping. Shared by the real
+// SessionStart path (synthetic=false) and resolveSession's self-heal path
+// (synthetic=true) so the two can't drift.
+//
+// Append-before-Set is deliberate and load-bearing: the JSONL log is the
+// append-only source of truth and can never be rewritten, while the mapping
+// file is a rebuildable cache. If we persisted the mapping first and the
+// session_start Append then failed, the next event would resolve via the Get
+// fast path and emit prompt/tool_use lines for a session whose start never
+// reached the log — a permanent, invisible start-less session. Writing the
+// start first means a failed Append leaves no mapping, so the next event
+// simply retries adoption. The only downside is the reverse failure (Append
+// ok, Set fails) yielding a duplicate session_start on retry — a visible,
+// recoverable fault, strictly preferable to silent loss.
+func (h *Handler) adoptSession(p *HookPayload, synthetic bool) (string, error) {
+	shpID := h.IDGen()
+	if err := h.emitSessionStart(p, shpID, synthetic); err != nil {
+		return "", err
+	}
+	if err := h.Sessions.Set(p.SessionID, shpID); err != nil {
+		return "", err
+	}
+	return shpID, nil
+}
+
+// emitSessionStart writes the session_start event and the per-project pointer
+// for shpID. The synthetic flag marks starts that resolveSession backfilled
+// because no real SessionStart hook was seen (see resolveSession), so
+// downstream consumers can tell an adopted session apart from a cleanly-
+// started one.
+func (h *Handler) emitSessionStart(p *HookPayload, shpID string, synthetic bool) error {
 	now := h.Now()
 	label := defaultLabel(now, p.Cwd)
 
@@ -68,6 +105,9 @@ func (h *Handler) HandleSessionStart(p *HookPayload) error {
 	}
 	if p.TranscriptPath != "" {
 		meta["transcript_path"] = p.TranscriptPath
+	}
+	if synthetic {
+		meta["synthetic_start"] = true
 	}
 
 	if err := h.Writer.Append(events.Event{
@@ -264,25 +304,46 @@ func (h *Handler) HandleSubagentStop(p *HookPayload) error {
 	return nil
 }
 
-// HandleStop emits the session_stop event and cleans up the cc-session-id
-// mapping file.
-//
-// If the mapping is missing, we treat the Stop as orphaned and decline to
-// emit any event. Orphaned stops happen at install boundaries: CC sessions
-// already open when `shiptrace init` runs never fire SessionStart with the
-// new hooks (CC reads settings.json at session-open time), so by the time
-// Stop fires there's no shp_ id to attach to. Synthesizing one would write
-// a phantom session_stop with no preceding start, prompt, or tool_use —
-// the ingester then materializes a "session" row at stop_ts with all-zero
-// counts, which is pure noise on the dashboard. The path-of-least-surprise
-// is to drop the event quietly and still clean up the per-cwd pointer.
+// HandleStop fires at the END OF EVERY ASSISTANT TURN — not at session end.
+// Claude Code emits Stop each time the main agent finishes responding, many
+// times over a session's life. It must therefore be side-effect-light: it
+// must NOT emit a session_stop and must NOT delete the session mapping.
+// Doing either (as an earlier version did) tears the session down mid-flight
+// and orphans every subsequent prompt/tool_use — the next resolveSession
+// finds no mapping and the hook fails with "no shp_ id mapping". Real
+// teardown lives in HandleSessionEnd, wired to CC's SessionEnd hook. Here we
+// only keep the per-project pointer warm so git attribution doesn't go stale
+// between turns. Best-effort; a missing pointer or cwd is a no-op.
 func (h *Handler) HandleStop(p *HookPayload) error {
+	h.touchProjectPointer(p.Cwd)
+	return nil
+}
+
+// HandleSessionEnd emits the session_stop event and cleans up the
+// cc-session-id mapping file. It is wired to Claude Code's SessionEnd hook,
+// which fires once when a session actually ends (clear, logout, exit) — the
+// correct boundary for "the session is over", unlike Stop.
+//
+// If the mapping is missing, we treat the end as orphaned and decline to emit
+// any event. Orphaned ends happen at install boundaries: CC sessions already
+// open when `shiptrace init` runs never fire SessionStart with the new hooks
+// (CC reads settings.json at session-open time), and if no prompt/tool_use
+// self-healed the session in between, there's no shp_ id to attach to.
+// Synthesizing one would write a phantom session_stop with no preceding
+// start — the ingester then materializes a "session" row at stop_ts with
+// all-zero counts, which is pure noise on the dashboard. The
+// path-of-least-surprise is to drop the event quietly and still clean up the
+// per-cwd pointer and mapping.
+func (h *Handler) HandleSessionEnd(p *HookPayload) error {
+	if p.SessionID == "" {
+		return errors.New("claudecode: SessionEnd payload missing session_id")
+	}
 	shpID, err := h.Sessions.Get(p.SessionID)
 	if err != nil {
 		return err
 	}
 	if shpID == "" {
-		// Orphaned Stop — clean up best-effort and return.
+		// Orphaned end — clean up best-effort and return.
 		h.clearProjectPointer(p.Cwd)
 		return h.Sessions.Delete(p.SessionID)
 	}
@@ -301,9 +362,17 @@ func (h *Handler) HandleStop(p *HookPayload) error {
 	return h.Sessions.Delete(p.SessionID)
 }
 
-// resolveSession looks up the shp_ id for the CC session_id, returning a
-// helpful error when the mapping is missing (it should not be, after
-// SessionStart fires).
+// resolveSession looks up the shp_ id for the CC session_id, adopting the
+// session on the fly if no mapping exists yet.
+//
+// A missing mapping is NOT an error: it happens whenever an event arrives for
+// a session whose SessionStart we never saw — the session was already open
+// when shiptrace was installed, or it ended and was cleaned up and is now
+// being resumed. Rather than drop the event (silent data loss — exactly the
+// failure mode the recorder is meant to avoid), we adopt the session: mint a
+// shp_ id, persist the mapping, and backfill a synthetic session_start so the
+// ingester has a real row to hang this prompt/tool_use on. Subsequent events
+// in the same session then resolve straight through the Get fast path.
 func (h *Handler) resolveSession(p *HookPayload) (string, error) {
 	if p.SessionID == "" {
 		return "", errors.New("claudecode: payload missing session_id")
@@ -312,8 +381,20 @@ func (h *Handler) resolveSession(p *HookPayload) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if shpID == "" {
-		return "", fmt.Errorf("claudecode: no shp_ id mapping for cc session %q (SessionStart hook may have missed)", p.SessionID)
+	if shpID != "" {
+		return shpID, nil
+	}
+	// Self-heal: adopt the unknown session so the event isn't dropped...
+	shpID, err = h.adoptSession(p, true)
+	if err != nil {
+		return "", err
+	}
+	// ...but still fail loud: a missing mapping means SessionStart didn't fire
+	// for this session, and if that's systemic (a broken hook) the user needs
+	// to know. The warning is non-fatal (the event was recorded) and fires
+	// once per session — adoption only runs while the mapping is absent.
+	if h.Warn != nil {
+		h.Warn(fmt.Sprintf("adopted cc session %q with no prior SessionStart; recorded a synthetic session_start. If SessionStart should be firing, restart the CC session to restore full telemetry.", p.SessionID))
 	}
 	return shpID, nil
 }

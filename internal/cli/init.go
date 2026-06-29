@@ -143,6 +143,7 @@ func prettyHooks(hooks map[ccsettings.HookEventName][]ccsettings.HookGroup) stri
 		ccsettings.PostToolUse,
 		ccsettings.SubagentStop,
 		ccsettings.Stop,
+		ccsettings.SessionEnd,
 	}
 	var sb strings.Builder
 	for _, k := range keys {

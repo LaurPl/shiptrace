@@ -62,11 +62,11 @@ func TestWritePreservesUnknownKeys(t *testing.T) {
 	}
 }
 
-func TestMergeAddsFiveHooks(t *testing.T) {
+func TestMergeAddsAllHooks(t *testing.T) {
 	s := &Settings{}
 	added := s.MergeShiptraceHooks("/usr/local/bin/shiptrace-cc-hook")
-	if added != 5 {
-		t.Fatalf("added: %d want 5", added)
+	if added != len(ShiptraceHooks) {
+		t.Fatalf("added: %d want %d", added, len(ShiptraceHooks))
 	}
 	for _, h := range ShiptraceHooks {
 		groups := s.Hooks[h.Event]
@@ -83,8 +83,8 @@ func TestMergeIdempotent(t *testing.T) {
 	s := &Settings{}
 	first := s.MergeShiptraceHooks("/path/shiptrace-cc-hook")
 	second := s.MergeShiptraceHooks("/path/shiptrace-cc-hook")
-	if first != 5 || second != 0 {
-		t.Errorf("first=%d second=%d want 5/0", first, second)
+	if first != len(ShiptraceHooks) || second != 0 {
+		t.Errorf("first=%d second=%d want %d/0", first, second, len(ShiptraceHooks))
 	}
 }
 
@@ -167,9 +167,10 @@ func TestMergeIdempotentAcrossQuotingStyles(t *testing.T) {
 		},
 	}
 	added := s.MergeShiptraceHooks("/usr/local/bin/shiptrace-cc-hook")
-	// 4 added (the other four events); SessionStart already present.
-	if added != 4 {
-		t.Errorf("expected 4 added (SessionStart recognized as legacy), got %d", added)
+	// All but SessionStart added; SessionStart already present as a legacy
+	// unquoted entry and must be recognized rather than duplicated.
+	if want := len(ShiptraceHooks) - 1; added != want {
+		t.Errorf("expected %d added (SessionStart recognized as legacy), got %d", want, added)
 	}
 }
 
@@ -177,13 +178,13 @@ func TestHasShiptraceHooks(t *testing.T) {
 	s := &Settings{}
 	s.MergeShiptraceHooks("/path/shiptrace-cc-hook")
 	present, missing := s.HasShiptraceHooks()
-	if len(missing) != 0 || len(present) != 5 {
+	if len(missing) != 0 || len(present) != len(ShiptraceHooks) {
 		t.Errorf("present=%v missing=%v", present, missing)
 	}
 
 	empty := &Settings{}
 	_, missing2 := empty.HasShiptraceHooks()
-	if len(missing2) != 5 {
-		t.Errorf("empty should miss 5, got %d", len(missing2))
+	if len(missing2) != len(ShiptraceHooks) {
+		t.Errorf("empty should miss %d, got %d", len(ShiptraceHooks), len(missing2))
 	}
 }

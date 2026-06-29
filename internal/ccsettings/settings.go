@@ -1,5 +1,5 @@
 // Package ccsettings reads, merges, and writes Claude Code's
-// ~/.claude/settings.json so `shiptrace init` can install the five hooks
+// ~/.claude/settings.json so `shiptrace init` can install the six hooks
 // shiptrace relies on without clobbering the user's existing config.
 //
 // The merge strategy is conservative: we APPEND a shiptrace command entry
@@ -29,6 +29,7 @@ const (
 	PostToolUse      HookEventName = "PostToolUse"
 	SubagentStop     HookEventName = "SubagentStop"
 	Stop             HookEventName = "Stop"
+	SessionEnd       HookEventName = "SessionEnd"
 )
 
 // ShiptraceHooks is the set of (CC event, shiptrace-cc-hook subcommand) we
@@ -43,6 +44,7 @@ var ShiptraceHooks = []struct {
 	{PostToolUse, "tool-use", "*"},
 	{SubagentStop, "subagent-stop", ""},
 	{Stop, "stop", ""},
+	{SessionEnd, "session-end", ""},
 }
 
 // Settings represents the subset of ~/.claude/settings.json we touch. We
