@@ -21,6 +21,7 @@ type harness struct {
 	sessions  *SessionMap
 	handler   *Handler
 	now       time.Time
+	warnings  []string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -49,7 +50,11 @@ func newHarness(t *testing.T) *harness {
 		counter++
 		return fakeID(counter)
 	}
-	return &harness{t: t, home: home, eventsDir: eventsDir, writer: w, sessions: m, handler: h, now: now}
+	hn := &harness{t: t, home: home, eventsDir: eventsDir, writer: w, sessions: m, handler: h, now: now}
+	// Capture warnings instead of letting them hit stderr, so tests can assert
+	// on the self-heal nag.
+	h.Warn = func(msg string) { hn.warnings = append(hn.warnings, msg) }
+	return hn
 }
 
 func fakeID(n int) string {
@@ -219,6 +224,36 @@ func TestHandlePromptSelfHealsWithoutMapping(t *testing.T) {
 	if ev[0].SessionID != mapped || ev[1].SessionID != mapped {
 		t.Errorf("events not stamped with mapped id: start=%s prompt=%s map=%s", ev[0].SessionID, ev[1].SessionID, mapped)
 	}
+
+	// Self-heal recovers the data but must still fail loud once, so a
+	// systemically broken SessionStart hook gets noticed (loud-fail doctrine).
+	if len(h.warnings) != 1 {
+		t.Fatalf("expected exactly 1 adoption warning, got %d: %v", len(h.warnings), h.warnings)
+	}
+	if !strings.Contains(h.warnings[0], "cc-orphan") || !strings.Contains(h.warnings[0], "SessionStart") {
+		t.Errorf("adoption warning not descriptive: %q", h.warnings[0])
+	}
+}
+
+// TestSelfHealOrderingSurvivesAppendFailure pins the Append-before-Set
+// ordering: if the session_start Append fails during adoption, NO mapping may
+// be persisted, so the next event retries adoption instead of resolving to a
+// start-less session (which would be permanent in the append-only log).
+func TestSelfHealOrderingSurvivesAppendFailure(t *testing.T) {
+	h := newHarness(t)
+	// Remove the events dir so the writer's OpenFile (and thus the session_start
+	// Append) fails — the writer reopens lazily, so closing it wouldn't.
+	if err := os.RemoveAll(h.eventsDir); err != nil {
+		t.Fatalf("rm eventsDir: %v", err)
+	}
+
+	err := h.handler.HandlePrompt(&HookPayload{SessionID: "cc-fail", Cwd: "/x", Prompt: "hi"})
+	if err == nil {
+		t.Fatalf("expected error when session_start Append fails")
+	}
+	if mapped, _ := h.sessions.Get("cc-fail"); mapped != "" {
+		t.Fatalf("mapping must NOT be persisted when the start Append failed, got %q", mapped)
+	}
 }
 
 func TestHandleToolUseEmitsToolEvent(t *testing.T) {
@@ -384,6 +419,10 @@ func TestHandleStopKeepsMappingAcrossTurns(t *testing.T) {
 		if e.EventType == events.SessionStart && e.Metadata["synthetic_start"] == true {
 			t.Errorf("prompt should resolve the live mapping, not self-heal a new session")
 		}
+	}
+	// A cleanly-mapped session must never emit the adoption nag.
+	if len(h.warnings) != 0 {
+		t.Errorf("no adoption warning expected on the mapped path, got: %v", h.warnings)
 	}
 }
 
