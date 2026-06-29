@@ -13,7 +13,17 @@ package store
 // In-progress sessions (end_ts IS NULL) are preserved because their
 // zero counts are normal — they just haven't done work yet.
 //
+// The `end_ts_inferred = 0` clause is load-bearing: it scopes "phantom" to
+// real-stop-derived rows. A session finalized by the staleness sweep
+// (end_ts_inferred = 1) can also have end_ts == start_ts and zero counts — a
+// session that started, did nothing observable, and was abandoned — but it had
+// a *real* session_start (so start_ts is its true birth, not a stop-timestamp
+// artifact). That is a real, if empty, session, not a phantom; without this
+// clause it would be silently dropped from every aggregate. Provenance, not the
+// timestamp coincidence, decides — which is exactly what the marker column
+// exists to encode.
+//
 // Callers splice this into queries where the sessions table is aliased
 // as `s`. It begins with " AND " so it can be appended to any existing
 // WHERE clause without re-parenthesizing.
-const PhantomFilterSQL = ` AND NOT (s.end_ts IS NOT NULL AND s.start_ts = s.end_ts AND s.prompt_count = 0 AND s.tool_call_count = 0)`
+const PhantomFilterSQL = ` AND NOT (s.end_ts IS NOT NULL AND s.end_ts_inferred = 0 AND s.start_ts = s.end_ts AND s.prompt_count = 0 AND s.tool_call_count = 0)`
