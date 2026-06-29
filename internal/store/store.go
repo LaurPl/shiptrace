@@ -20,6 +20,15 @@ type Store struct {
 	db *sql.DB
 }
 
+// dbtx is the read+write surface common to *sql.DB and *sql.Tx, so helper
+// functions can run either standalone or inside a transaction. The staleness
+// sweep uses this to run its UPDATEs and replan recomputes atomically.
+type dbtx interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
 // Open opens (or creates) the SQLite database at path, applies any pending
 // migrations, and returns the Store. Idempotent — safe to call against an
 // existing DB.

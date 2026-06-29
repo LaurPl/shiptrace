@@ -52,15 +52,23 @@ func (s *Store) UpsertSessionStart(ctx context.Context, e events.Event) error {
 	return nil
 }
 
-// UpdateSessionStop sets end_ts on a session that has none yet. If the
-// session row doesn't exist (events out of order), we insert a minimal row
-// so the join targets aren't lost.
+// UpdateSessionStop sets end_ts from a real session_stop event. If the session
+// row doesn't exist (events out of order), we insert a minimal row so the join
+// targets aren't lost.
+//
+// The guard `end_ts IS NULL OR end_ts_inferred = 1` makes a real stop
+// authoritative over the staleness sweep: it claims a still-open session and
+// also overwrites an end_ts the sweep inferred (flipping the marker back to 0),
+// so a session that was finalized-by-staleness and then cleanly /quit ends up
+// with its true end time. It does NOT overwrite an end_ts already set by an
+// earlier real stop (end_ts set, inferred = 0): old pre-#16 logs emitted a
+// session_stop every turn, and first-real-stop-wins must hold on replay.
 func (s *Store) UpdateSessionStop(ctx context.Context, e events.Event) error {
 	if e.SessionID == "" {
 		return fmt.Errorf("store: session_stop missing session_id")
 	}
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE sessions SET end_ts = ? WHERE id = ? AND end_ts IS NULL`,
+		`UPDATE sessions SET end_ts = ?, end_ts_inferred = 0 WHERE id = ? AND (end_ts IS NULL OR end_ts_inferred = 1)`,
 		e.Ts.Unix(), e.SessionID,
 	)
 	if err != nil {
@@ -68,12 +76,16 @@ func (s *Store) UpdateSessionStop(ctx context.Context, e events.Event) error {
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
-		// Either the session was never started (out-of-order events) or it
-		// was already stopped. The first case is the one we can heal: insert
-		// a minimal row so analytics don't lose the session entirely.
+		// Either the session was never started (out-of-order events) or it was
+		// already stopped by a real stop. The first case is the one we can
+		// heal: insert a minimal row so analytics don't lose the session.
+		// end_ts_inferred is named explicitly as 0 so this real-stop-derived
+		// end is never mistaken for a sweep-inferred one (and so the row's
+		// phantom classification can't silently shift if the column default
+		// ever changes).
 		_, err := s.db.ExecContext(ctx, `
-			INSERT INTO sessions (id, provider, start_ts, end_ts)
-			VALUES (?, ?, ?, ?)
+			INSERT INTO sessions (id, provider, start_ts, end_ts, end_ts_inferred)
+			VALUES (?, ?, ?, ?, 0)
 			ON CONFLICT(id) DO NOTHING
 		`,
 			e.SessionID,

@@ -58,17 +58,26 @@ func (s *Store) ListReplanSignals(ctx context.Context, sessionID string) ([]Repl
 //
 // Returns the computed score so callers (and tests) can assert on it.
 func (s *Store) ComputeAndStoreReplanScore(ctx context.Context, sessionID string) (float64, error) {
+	return computeAndStoreReplanScore(ctx, s.db, sessionID)
+}
+
+// computeAndStoreReplanScore is the dbtx-parameterized body of
+// ComputeAndStoreReplanScore. The staleness sweep calls it with its *sql.Tx so
+// the end_ts finalization and the score recompute commit atomically — a crash
+// between the two must not leave a session "finalized but unscored", which the
+// marker column would otherwise make permanent until a rebuild.
+func computeAndStoreReplanScore(ctx context.Context, q dbtx, sessionID string) (float64, error) {
 	if sessionID == "" {
 		return 0, nil
 	}
-	signals, err := s.loadReplanSignals(ctx, sessionID)
+	signals, err := loadReplanSignals(ctx, q, sessionID)
 	if err != nil {
 		return 0, err
 	}
 	reversals := replan.DetectReversals(signals)
 	score := replan.ComputeScore(signals, reversals)
 
-	if _, err := s.db.ExecContext(ctx,
+	if _, err := q.ExecContext(ctx,
 		`UPDATE sessions SET replan_score = ? WHERE id = ?`,
 		score, sessionID,
 	); err != nil {
@@ -80,8 +89,8 @@ func (s *Store) ComputeAndStoreReplanScore(ctx context.Context, sessionID string
 // loadReplanSignals reads the per-session replan_signal rows in ascending
 // ts order and re-hydrates the per-kind metadata back onto the Signal
 // struct so the replan package can work on a clean shape.
-func (s *Store) loadReplanSignals(ctx context.Context, sessionID string) ([]replan.Signal, error) {
-	rows, err := s.db.QueryContext(ctx, `
+func loadReplanSignals(ctx context.Context, q dbtx, sessionID string) ([]replan.Signal, error) {
+	rows, err := q.QueryContext(ctx, `
 		SELECT ts, kind, weight, metadata
 		FROM replan_signals
 		WHERE session_id = ?
